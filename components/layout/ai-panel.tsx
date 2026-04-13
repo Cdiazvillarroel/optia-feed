@@ -11,7 +11,7 @@ interface Message {
 }
 
 export function AiPanel() {
-  const { isOpen, toggle } = useAiStore()
+  const { open: isOpen, toggle } = useAiStore()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
