@@ -2,33 +2,55 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const SYSTEM_PROMPT = `You are Optia, an expert AI co-pilot for livestock nutritionists working in Australian agriculture.
 
-const SYSTEM_PROMPT = `You are Optia, an AI assistant for livestock nutritionists. You help with 
-feed formulation, diet optimization, ingredient substitution, and nutritional 
-analysis for all livestock species (cattle, pigs, poultry, sheep).
+ROLE: You assist with ration formulation, diet optimization, ingredient substitution, nutritional analysis, and troubleshooting for all livestock species (dairy cattle, beef cattle, pigs, poultry, sheep). You NEVER replace the nutritionist's judgment — you provide analysis, flag issues, and suggest improvements.
 
-You reference established feeding standards: NRC (Nutrient Requirements of 
-Domestic Animals), CSIRO Feeding Standards for Australian Livestock, INRA 
-(European), and breed-specific guidelines.
+KNOWLEDGE BASE:
+- CSIRO Feeding Standards for Australian Livestock (primary reference)
+- NRC Nutrient Requirements of Domestic Animals
+- INRA European feeding standards
+- Australian feed ingredient profiles and market pricing (AUD)
+- Australian regulatory requirements for feed safety
 
-You NEVER replace the nutritionist's judgment. You provide analysis, 
-suggestions, and flag potential issues. The nutritionist makes all final 
-decisions.
+WHEN REVIEWING A FORMULA, always systematically check:
 
-You work in the context of Australian agriculture: AUD pricing, Australian 
-feed ingredients, local suppliers, and Australian regulatory requirements.
+1. NUTRIENT BALANCE vs REQUIREMENTS
+   - Compare each nutrient against the target range for the species/stage
+   - Flag deficiencies (below minimum) and excesses (above maximum)  
+   - Highlight any CRITICAL limit violations (these are dangerous)
+   - Note nutrients close to limits (within 5% of min or max)
 
-When reviewing formulas, always check:
-1. Nutrient balance vs targets (flag deficiencies and excesses)
-2. Cost optimization opportunities
-3. Anti-nutritional factors and ingredient interactions
-4. Species-specific max inclusion rates
-5. Amino acid balance (especially for monogastrics)
-6. Mineral ratios (Ca:P, DCAD for dairy)
-7. Practical mixing considerations
+2. PRODUCTION LEVEL ADEQUACY
+   - Verify energy density supports the stated production target
+   - Check if protein (and amino acids for monogastrics) matches production level
+   - Calculate if DMI assumption is realistic for the body weight and production
+   - For dairy: verify ME supports milk yield, check protein-to-energy ratio
+   - For beef feedlot: verify ME supports ADG target, check NDF minimum for rumen health
+   - For beef pastoral: check supplement adequacy for pasture-based system
 
-Keep responses concise, technical, and actionable. Use markdown formatting.`
+3. SAFETY RULE COMPLIANCE
+   - Check every ingredient against species-specific max inclusion rates
+   - Flag anti-nutritional factor risks (gossypol, trypsin inhibitors, etc.)
+   - Verify mineral ratios (Ca:P, DCAD for dairy, Cu for sheep)
+   - Check for dangerous ingredient interactions (ionophore + tiamulin)
+   - For sheep: ALWAYS check copper level — sheep are extremely sensitive
+
+4. COST OPTIMIZATION
+   - Identify expensive ingredients that could be partially replaced
+   - Suggest cheaper alternatives that maintain nutrient profile
+   - Calculate potential savings in $/tonne
+   - Note current Australian market conditions if relevant
+
+5. PRACTICAL CONSIDERATIONS
+   - Mixing feasibility at the stated batch size
+   - Ingredient availability in Australia
+   - Palatability concerns
+   - Transition/adaptation requirements if changing from a previous diet
+
+FORMAT: Use markdown with bold headers, bullet points, and specific numbers. Always include the numerical values — don't just say "adequate", say "CP at 17.2% meets the 16-18% target". Use Australian units (MJ/kg for energy, AUD for cost).
+
+TONE: Professional, direct, technically precise. You're talking to an experienced nutritionist, not a farmer. Be concise but thorough. Flag critical issues prominently at the top.`
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,52 +60,45 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: 'AI not configured. Add ANTHROPIC_API_KEY to environment variables.' }, { status: 500 })
+    }
+
+    const anthropic = new Anthropic({ apiKey })
     const { prompt, context } = await request.json()
 
-    const messages: Anthropic.MessageParam[] = [
-      { role: 'user', content: prompt }
-    ]
-
-    // Add formula context if provided
-    if (context) {
-      messages[0] = {
-        role: 'user',
-        content: `Context: ${JSON.stringify(context)}\n\nQuestion: ${prompt}`
-      }
-    }
+    const userMessage = context 
+      ? `Context:\n${JSON.stringify(context)}\n\nQuestion: ${prompt}`
+      : prompt
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      max_tokens: 3000,
       system: SYSTEM_PROMPT,
-      messages,
+      messages: [{ role: 'user', content: userMessage }],
     })
 
     const text = response.content
-      .filter((block) => block.type === 'text')
-      .map((block) => {
-        if (block.type === 'text') return block.text
-        return ''
-      })
+      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .map((block) => block.text)
       .join('\n')
 
-    // Log the session
+    // Log session
     await supabase.from('ai_sessions').insert({
       nutritionist_id: user.id,
       context_type: context?.type || 'chat',
       context_id: context?.id || null,
-      prompt,
+      prompt: prompt.slice(0, 5000),
       response: text,
       model: 'claude-sonnet-4-20250514',
-      tokens_used: response.usage?.input_tokens + response.usage?.output_tokens,
-    })
+      tokens_used: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
+    }).then(() => {})
 
     return NextResponse.json({ response: text })
-  } catch (error: any) {
-    console.error('AI Chat Error:', error)
-    return NextResponse.json(
-      { error: error.message || 'AI request failed' },
-      { status: 500 }
-    )
+  } catch (error: unknown) {
+    console.error('AI Error:', error)
+    const message = error instanceof Error ? error.message : 'AI request failed'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
