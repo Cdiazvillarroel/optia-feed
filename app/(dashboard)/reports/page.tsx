@@ -169,8 +169,7 @@ export default function ReportsPage() {
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${c.name} — Nutrition Audit</title><style>${css()}</style></head><body>
     ${headerHTML('Nutrition Audit', c.name+' — Nutrition Audit')}
     <div style="font-size:12px;color:#666;margin-bottom:20px">${c.location||''} &middot; ${clientFormulas.length} formula${clientFormulas.length!==1?'s':''} reviewed</div>
-    <div class="stat-grid"><div class="stat-box"><div class="sl">Formulas Reviewed</div><div class="sv green">${clientFormulas.length}</div></div><div class="stat-box"><div class="sl">Species</div><div class="sv green">${[...new Set(clientFormulas.map(ff=>ff.species))].length}</div></div><div class="stat-box"><div class="sl">Avg Cost/t</div><div class="sv amber">$${clientFormulas.length>0?(clientFormulas.reduce((s,ff)=>{const ii=formulaIngs[ff.id]||[];return s+ii.reduce((ss: number,fi: any)=>ss+(prices[fi.ingredient_id]||0)*(fi.inclusion_pct||0)/100,0)},0)/clientFormulas.length).toFixed(0):'0'}</div></div><div class="stat-box"><div class="sl">Date</div><div class="sv green" style="font-size:14px">${new Date().toLocaleDateString('en-AU',{day:'numeric',month:'short'})}</div></div></div>
-    <h2>Formula Review</h2>
+    Array.from(new Set(clientFormulas.map(ff=>ff.species))).length
     ${clientFormulas.length>0?auditRows:'<div class="section-card gray">No formulas to audit.</div>'}
     ${footerHTML()}</body></html>`
 
