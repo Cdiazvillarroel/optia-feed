@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { Plus, Sparkles, Save, Lock, Unlock, X, Search, ChevronDown, ChevronUp, Loader2, ToggleLeft, ToggleRight, Zap, GitCompare, RotateCcw } from 'lucide-react'
+import { Plus, Sparkles, Save, Lock, Unlock, X, Search, ChevronDown, ChevronUp, Loader2, ToggleLeft, ToggleRight, Zap, GitCompare, RotateCcw, Download } from 'lucide-react'
 
 interface Req { nutrient: string; unit: string; min: number|null; max: number|null; target: number; critical_max?: number|null; critical_min?: number|null }
 interface Ratio { name: string; min: number; max: number; target: number; unit?: string }
@@ -40,86 +40,96 @@ function calculateMPDemand(species: string, prod: Record<string,string>): number
 
 function estimateMethane(me: number, dmi: number) { const gei=dmi*me/0.60; const mj=0.065*gei; return{ch4_g:mj/0.0556,ch4_int:dmi>0?mj/0.0556/dmi:0} }
 
-// ── OPTIMIZER (Local Search) ─────────────────────────────
+// ── OPTIMIZER (Coordinate Descent + Fine-tuning) ─────────
 interface OptConstraint { key: string; label: string; enabled: boolean; min: number; max: number }
 interface OptIngConstraint { idx: number; min: number; max: number }
 
 function runOptimizer(
   ings: any[], prices: Record<string,number>,
   constraints: OptConstraint[], ingConstraints: OptIngConstraint[],
-  iterations: number = 5000
+  iterations: number = 10000
 ): { solution: number[]; cost: number; feasible: boolean; improved: boolean } {
   const n = ings.length
   if (n === 0) return { solution: [], cost: 0, feasible: false, improved: false }
 
-  // Current solution
   const current = ings.map(fi => fi.inclusion_pct || 0)
-  const originalCost = calcCostForSolution(current, ings, prices)
+  const originalCost = calcSolCost(current)
 
-  // Nutrient calculation for a solution
-  function calcNut(sol: number[], key: string): number {
+  function calcNutSol(sol: number[], key: string): number {
     return sol.reduce((s, pct, i) => s + (ings[i].ingredient?.[key] || 0) * pct / 100, 0)
   }
-
-  function calcCostForSolution(sol: number[], ingredients: any[], prc: Record<string,number>): number {
-    const totalAF = sol.reduce((s, pct, i) => s + pct/100*1000/((ingredients[i].ingredient?.dm_pct||88)/100), 0)
+  function calcSolCost(sol: number[]): number {
+    const totalAF = sol.reduce((s, pct, i) => s + pct / 100 * 1000 / ((ings[i].ingredient?.dm_pct || 88) / 100), 0)
     return sol.reduce((s, pct, i) => {
-      const afKg = pct/100*1000/((ingredients[i].ingredient?.dm_pct||88)/100)
-      const afProp = totalAF > 0 ? afKg/totalAF : 0
-      return s + (prc[ingredients[i].ingredient_id]||0) * afProp
+      const afKg = pct / 100 * 1000 / ((ings[i].ingredient?.dm_pct || 88) / 100)
+      return s + (prices[ings[i].ingredient_id] || 0) * (totalAF > 0 ? afKg / totalAF : 0)
     }, 0)
   }
-
   function isFeasible(sol: number[]): boolean {
     const total = sol.reduce((s, v) => s + v, 0)
-    if (total < 99 || total > 101) return false
-
+    if (total < 99.5 || total > 100.5) return false
     for (const c of constraints) {
       if (!c.enabled) continue
-      const val = calcNut(sol, c.key)
-      if (val < c.min || val > c.max) return false
+      const val = calcNutSol(sol, c.key)
+      if (val < c.min - 0.01 || val > c.max + 0.01) return false
     }
-
     for (const ic of ingConstraints) {
-      if (sol[ic.idx] < ic.min || sol[ic.idx] > ic.max) return false
+      if (sol[ic.idx] < ic.min - 0.01 || sol[ic.idx] > ic.max + 0.01) return false
     }
-
     return true
   }
 
   let best = [...current]
-  let bestCost = isFeasible(best) ? calcCostForSolution(best, ings, prices) : Infinity
+  let bestCost = isFeasible(best) ? calcSolCost(best) : Infinity
 
-  // Local search: try swapping between ingredient pairs
+  // Phase 1: Coordinate descent — systematic pairwise optimization
+  for (let pass = 0; pass < 20; pass++) {
+    let improved = false
+    for (let i = 0; i < n; i++) {
+      if (ings[i].locked) continue
+      for (let j = 0; j < n; j++) {
+        if (i === j || ings[j].locked) continue
+        let lo = 0, hi = Math.min(best[i], 60)
+        for (let bs = 0; bs < 20; bs++) {
+          const mid = (lo + hi) / 2
+          const candidate = [...best]
+          candidate[i] = Math.max(0, best[i] - mid)
+          candidate[j] = Math.min(100, best[j] + mid)
+          if (isFeasible(candidate) && calcSolCost(candidate) < bestCost) { lo = mid } else { hi = mid }
+        }
+        if (lo > 0.05) {
+          const final2 = [...best]
+          final2[i] = Math.max(0, best[i] - lo)
+          final2[j] = Math.min(100, best[j] + lo)
+          if (isFeasible(final2)) {
+            const newCost = calcSolCost(final2)
+            if (newCost < bestCost - 0.01) { best = final2; bestCost = newCost; improved = true }
+          }
+        }
+      }
+    }
+    if (!improved) break
+  }
+
+  // Phase 2: Fine-tuning with random perturbations
   for (let iter = 0; iter < iterations; iter++) {
     const candidate = [...best]
-    const step = Math.max(0.1, 2.0 * (1 - iter / iterations)) // decreasing step size
-
-    // Pick two random ingredients
+    const step = 0.1 + Math.random() * 0.5
     const i = Math.floor(Math.random() * n)
     const j = Math.floor(Math.random() * n)
-    if (i === j) continue
-    if (ings[i].locked || ings[j].locked) continue
-
-    // Transfer from i to j
-    const amount = Math.random() * step
-    candidate[i] = Math.max(0, candidate[i] - amount)
-    candidate[j] = Math.max(0, candidate[j] + amount)
-
+    if (i === j || ings[i].locked || ings[j].locked) continue
+    candidate[i] = Math.max(0, candidate[i] - step)
+    candidate[j] = Math.max(0, candidate[j] + step)
     if (isFeasible(candidate)) {
-      const cost = calcCostForSolution(candidate, ings, prices)
-      if (cost < bestCost) {
-        best = candidate
-        bestCost = cost
-      }
+      const cost = calcSolCost(candidate)
+      if (cost < bestCost) { best = candidate; bestCost = cost }
     }
   }
 
   return {
     solution: best.map(v => Math.round(v * 10) / 10),
-    cost: bestCost,
-    feasible: bestCost < Infinity,
-    improved: bestCost < originalCost
+    cost: bestCost, feasible: bestCost < Infinity,
+    improved: bestCost < originalCost - 0.5
   }
 }
 
@@ -148,7 +158,6 @@ export default function FormulaBuilderPage() {
   const [aiQuestion, setAiQuestion] = useState('')
   const [basis, setBasis] = useState<'dm'|'asfed'>('dm')
   const [ingCatFilter, setIngCatFilter] = useState('')
-  // Optimizer
   const [showOptimizer, setShowOptimizer] = useState(false)
   const [optRunning, setOptRunning] = useState(false)
   const [optResult, setOptResult] = useState<any>(null)
@@ -161,7 +170,6 @@ export default function FormulaBuilderPage() {
     { key: 'p_pct', label: 'P (%)', enabled: false, min: 0.25, max: 0.50 },
     { key: 'starch_pct', label: 'Starch (%)', enabled: false, min: 15, max: 35 },
   ])
-  // Compare
   const [showCompare, setShowCompare] = useState(false)
   const [compareSlots, setCompareSlots] = useState<(CompareSlot|null)[]>([null, null, null, null])
 
@@ -194,7 +202,6 @@ export default function FormulaBuilderPage() {
   const totalAsFedKg = ings.reduce((s, fi) => s + getAsFedKg(fi), 0)
   const avgDMPct = totalAsFedKg > 0 ? (totalPctDM/100*batchKg)/totalAsFedKg*100 : 0
   const costAF = ings.reduce((s, fi) => { const afP=totalAsFedKg>0?getAsFedKg(fi)/totalAsFedKg:0; return s+(prices[fi.ingredient_id]||0)*afP }, 0)
-  const costDM = avgDMPct > 0 ? costAF/(avgDMPct/100) : 0
 
   const cp=calcNut('cp_pct'),me=calcNut('me_mj'),ndf=calcNut('ndf_pct'),adf=calcNut('adf_pct'),ee=calcNut('ee_pct'),starch=calcNut('starch_pct')
   const ca=calcNut('ca_pct'),pp=calcNut('p_pct'),mg=calcNut('mg_pct'),k=calcNut('k_pct'),na=calcNut('na_pct'),s2=calcNut('s_pct')
@@ -205,6 +212,13 @@ export default function FormulaBuilderPage() {
   const fcRatio=foragePct+concPct>0?`${Math.round(foragePct/(foragePct+concPct)*100)}:${Math.round(concPct/(foragePct+concPct)*100)}`:'—'
   const peNDF=ings.reduce((s,fi)=>s+(fi.ingredient?.ndf_pct||0)*(fi.ingredient?.pendf_factor||0)*(fi.inclusion_pct||0)/100,0)
   const dcad=ings.reduce((s,fi)=>s+(fi.ingredient?.dcad||0)*(fi.inclusion_pct||0)/100,0)
+
+  // Energy equations (NRC)
+  const de = me > 0 ? me / 0.82 : 0
+  const tdn = de > 0 ? de * 100 / 18.4 : 0
+  const nel = me > 0 ? 0.703 * me - 0.19 : 0
+  const nem = me > 0 ? 1.37 * me - 0.138 * me * me + 0.0105 * me * me * me - 1.12 : 0
+  const neg = me > 0 ? 1.42 * me - 0.174 * me * me + 0.0122 * me * me * me - 1.65 : 0
 
   const mpData=calculateMP(ings,me)
   const mpDemand=formula?calculateMPDemand(formula.species,production):0
@@ -242,61 +256,47 @@ export default function FormulaBuilderPage() {
 
   async function updateStatus(st: string){const supabase=await getSupabase();await supabase.from('formulas').update({status:st}).eq('id',params.id);setFormula({...formula,status:st})}
 
+  // ── EXPORT ─────────────────────────────────────────────
+  function handleExport() {
+    if (!formula || ings.length === 0) return
+    const headers = ['Ingredient','Category','Type','Inclusion_DM_pct','DM_kg','AsFed_kg','DM_pct','CP_pct','ME_MJ','NDF_pct','ADF_pct','Fat_pct','Starch_pct','Ca_pct','P_pct','NEm_MJ','NEl_MJ','aN','bN','cN','Price_per_t']
+    const rows = ings.filter(fi => fi.inclusion_pct > 0).map(fi => {
+      const ing = fi.ingredient
+      const dmKg = fi.inclusion_pct / 100 * batchKg
+      const afKg = dmKg / ((ing?.dm_pct || 88) / 100)
+      return [ing?.name, ing?.category, ing?.particle_class, fi.inclusion_pct.toFixed(2), dmKg.toFixed(1), afKg.toFixed(1), ing?.dm_pct, ing?.cp_pct, ing?.me_mj, ing?.ndf_pct, ing?.adf_pct, ing?.ee_pct, ing?.starch_pct, ing?.ca_pct, ing?.p_pct, ing?.nem_mj||nem.toFixed(2), ing?.nel_mj||nel.toFixed(2), ing?.an_frac, ing?.bn_frac, ing?.cn_rate, prices[fi.ingredient_id] || ''].join(',')
+    })
+    const meta = [`# Formula: ${formula.name}`,`# Version: ${formula.version}`,`# Species: ${formula.species}`,`# Stage: ${stageName || formula.production_stage}`,`# Client: ${formula.client?.name || 'N/A'}`,`# Batch: ${batchKg} kg`,`# Date: ${new Date().toISOString().split('T')[0]}`,`# Cost/t AF: $${costAF.toFixed(0)}`,`# CP: ${cp.toFixed(1)}%  ME: ${me.toFixed(1)} MJ  NDF: ${ndf.toFixed(1)}%  F:C: ${fcRatio}`,`# MP Supply: ${mpData.mpSupply.toFixed(1)}  Demand: ${mpDemand.toFixed(1)}  Balance: ${mpBalance.toFixed(1)}`,`# NEl: ${nel.toFixed(1)} MJ  NEm: ${nem.toFixed(1)} MJ  NEg: ${neg.toFixed(1)} MJ  TDN: ${tdn.toFixed(1)}%`,`# Model: AFRC/CSIRO`,'']
+    const csv = [...meta, headers.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `${formula.name.replace(/[^a-zA-Z0-9]/g, '_')}_v${formula.version}.csv`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+  }
+
   // ── OPTIMIZER ──────────────────────────────────────────
   function handleRunOptimizer() {
     setOptRunning(true); setOptResult(null)
-    const ingC: OptIngConstraint[] = ings.map((fi, idx) => ({
-      idx, min: fi.locked ? fi.inclusion_pct : 0,
-      max: fi.locked ? fi.inclusion_pct : (fi.ingredient?.max_inclusion_pct || 60)
-    }))
-    setTimeout(() => {
-      const result = runOptimizer(ings, prices, optConstraints, ingC, 8000)
-      setOptResult(result); setOptRunning(false)
-    }, 100)
+    const ingC: OptIngConstraint[] = ings.map((fi, idx) => ({ idx, min: fi.locked ? fi.inclusion_pct : 0, max: fi.locked ? fi.inclusion_pct : (fi.ingredient?.max_inclusion_pct || 60) }))
+    setTimeout(() => { const result = runOptimizer(ings, prices, optConstraints, ingC, 8000); setOptResult(result); setOptRunning(false) }, 100)
   }
 
-  function applyOptResult() {
-    if (!optResult?.solution) return
-    const updated = ings.map((fi, idx) => ({ ...fi, inclusion_pct: optResult.solution[idx] }))
-    setIngs(updated); setSaved(false); setShowOptimizer(false); setOptResult(null)
-  }
+  function applyOptResult() { if (!optResult?.solution) return; const updated = ings.map((fi, idx) => ({ ...fi, inclusion_pct: optResult.solution[idx] })); setIngs(updated); setSaved(false); setShowOptimizer(false); setOptResult(null) }
 
   // ── COMPARE ────────────────────────────────────────────
-  function saveToCompareSlot(slotIdx: number) {
-    const slots = [...compareSlots]
-    slots[slotIdx] = {
-      name: `Diet ${slotIdx+1} — ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`,
-      ings: ings.map(fi => ({ name: fi.ingredient?.name, pct: fi.inclusion_pct, id: fi.ingredient_id })),
-      production: { ...production },
-      nutrients: { cp, me, ndf, ee, ca, p: pp, starch, caP, peNDF },
-      cost: costAF, margin: marginPerDay,
-      mp: mpData.mpSupply, fc: fcRatio,
-      timestamp: new Date()
-    }
-    setCompareSlots(slots)
-  }
-
-  function recallFromSlot(slotIdx: number) {
-    const slot = compareSlots[slotIdx]
-    if (!slot) return
-    const updated = ings.map(fi => {
-      const saved = slot.ings.find((si: any) => si.id === fi.ingredient_id)
-      return saved ? { ...fi, inclusion_pct: saved.pct } : { ...fi, inclusion_pct: 0 }
-    })
-    setIngs(updated); setProduction(slot.production); setSaved(false)
-  }
-
+  function saveToCompareSlot(slotIdx: number) { const slots = [...compareSlots]; slots[slotIdx] = { name: `Diet ${slotIdx+1} — ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`, ings: ings.map(fi => ({ name: fi.ingredient?.name, pct: fi.inclusion_pct, id: fi.ingredient_id })), production: { ...production }, nutrients: { cp, me, ndf, ee, ca, p: pp, starch, caP, peNDF }, cost: costAF, margin: marginPerDay, mp: mpData.mpSupply, fc: fcRatio, timestamp: new Date() }; setCompareSlots(slots) }
+  function recallFromSlot(slotIdx: number) { const slot = compareSlots[slotIdx]; if (!slot) return; const updated = ings.map(fi => { const saved2 = slot.ings.find((si: any) => si.id === fi.ingredient_id); return saved2 ? { ...fi, inclusion_pct: saved2.pct } : { ...fi, inclusion_pct: 0 } }); setIngs(updated); setProduction(slot.production); setSaved(false) }
   function clearSlot(idx: number) { const s=[...compareSlots]; s[idx]=null; setCompareSlots(s) }
 
   // ── AI ──────────────────────────────────────────────────
-  function buildCtx(){return`FORMULA: ${formula.name} (v${formula.version})\nSPECIES: ${formula.species} | STAGE: ${stageName}\nCP:${cp.toFixed(1)}% ME:${me.toFixed(1)} NDF:${ndf.toFixed(1)}% F:C:${fcRatio} peNDF:${peNDF.toFixed(1)}% DCAD:${dcad.toFixed(0)}\nMP supply:${mpData.mpSupply.toFixed(1)}% demand:${mpDemand.toFixed(1)}% balance:${mpBalance.toFixed(1)}%\nCost:$${costAF.toFixed(0)}/t Margin:$${marginPerDay.toFixed(2)}/d\n${ings.map(fi=>`${fi.ingredient?.name}: ${fi.inclusion_pct.toFixed(1)}% ${fi.ingredient?.particle_class==='forage'?'[F]':'[C]'}`).join('\n')}`}
-  async function handleAiReview(){setAiLoading(true);setShowAi(true);setAiReview(null);try{const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:`Full review. MP, DMI, F:C, DCAD, methane, margin. AU context.\n\n${buildCtx()}`})});const data=await res.json();setAiReview(data.response||'No response.');const supabase=await getSupabase();await supabase.from('formulas').update({ai_review:data.response,ai_reviewed_at:new Date().toISOString()}).eq('id',params.id)}catch{setAiReview('Error.')}setAiLoading(false)}
+  function buildCtx(){return`FORMULA: ${formula.name} (v${formula.version})\nSPECIES: ${formula.species} | STAGE: ${stageName}\nCP:${cp.toFixed(1)}% ME:${me.toFixed(1)} NDF:${ndf.toFixed(1)}% F:C:${fcRatio} peNDF:${peNDF.toFixed(1)}% DCAD:${dcad.toFixed(0)}\nMP supply:${mpData.mpSupply.toFixed(1)}% demand:${mpDemand.toFixed(1)}% balance:${mpBalance.toFixed(1)}%\nNEl:${nel.toFixed(1)} NEm:${nem.toFixed(1)} NEg:${neg.toFixed(1)} TDN:${tdn.toFixed(1)}%\nCost:$${costAF.toFixed(0)}/t Margin:$${marginPerDay.toFixed(2)}/d\n${ings.map(fi=>`${fi.ingredient?.name}: ${fi.inclusion_pct.toFixed(1)}% ${fi.ingredient?.particle_class==='forage'?'[F]':'[C]'}`).join('\n')}`}
+  async function handleAiReview(){setAiLoading(true);setShowAi(true);setAiReview(null);try{const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:`Full review. MP, DMI, F:C, DCAD, methane, margin, energy systems. AU context.\n\n${buildCtx()}`})});const data=await res.json();setAiReview(data.response||'No response.');const supabase=await getSupabase();await supabase.from('formulas').update({ai_review:data.response,ai_reviewed_at:new Date().toISOString()}).eq('id',params.id)}catch{setAiReview('Error.')}setAiLoading(false)}
   async function handleAiQ(){if(!aiQuestion.trim())return;setAiLoading(true);const q=aiQuestion;setAiQuestion('');try{const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:`${q}\n\n${buildCtx()}`})});const data=await res.json();setAiReview(data.response||'No response.')}catch{setAiReview('Error.')}setAiLoading(false)}
 
   if (!formula) return <div className="p-7 text-text-ghost">Loading...</div>
   const prodFields = PRODUCTION_FIELDS[formula.species]||PRODUCTION_FIELDS.beef
   const addableIngs = allIngredients.filter(i=>{if(ings.some(fi=>fi.ingredient_id===i.id)) return false; if(!(i.species_suitable as string[]||[]).includes(formula.species)) return false; if(ingSearch&&!i.name.toLowerCase().includes(ingSearch.toLowerCase())) return false; if(ingCatFilter==='forage'&&i.particle_class!=='forage') return false; if(ingCatFilter==='concentrate'&&i.particle_class!=='concentrate') return false; if(ingCatFilter==='energy'&&i.category!=='energy') return false; if(ingCatFilter==='protein'&&i.category!=='protein') return false; if(ingCatFilter==='byproduct'&&i.category!=='byproduct') return false; if(ingCatFilter==='mineral'&&i.category!=='mineral') return false; return true})
-  
 
   return (
     <div className="p-4 max-w-[1400px] h-[calc(100vh-32px)] flex flex-col">
@@ -311,6 +311,7 @@ export default function FormulaBuilderPage() {
         <div className="flex gap-1.5">
           <button onClick={()=>setShowCompare(true)} className="btn btn-ghost btn-sm" title="Compare"><GitCompare size={14}/> Compare</button>
           <button onClick={()=>{setOptResult(null);setShowOptimizer(true)}} className="btn btn-ghost btn-sm" title="Optimize"><Zap size={14}/> Optimize</button>
+          <button onClick={handleExport} className="btn btn-ghost btn-sm" title="Export CSV"><Download size={14}/> Export</button>
           <button onClick={handleAiReview} disabled={aiLoading} className="btn btn-ai btn-sm"><Sparkles size={14}/> AI</button>
           <button onClick={handleSave} disabled={saving} className={`btn btn-primary btn-sm ${saved?'bg-brand/50':''}`}><Save size={14}/> {saved?'\u2713':'Save'}</button>
         </div>
@@ -384,6 +385,8 @@ export default function FormulaBuilderPage() {
               <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Rumen Health</div>
               {[['F:C',fcRatio,foragePct<30?'text-status-red':foragePct<40?'text-status-amber':'text-brand'],['peNDF',peNDF.toFixed(1)+'%',peNDF<18?'text-status-red':peNDF<22?'text-status-amber':'text-brand'],['DCAD',dcad.toFixed(0)+' mEq/kg','text-text-dim']].map(([l,v,c])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className={`text-[10px] font-mono font-bold ${c}`}>{v}</span></div>))}</div>
               {dmiPct>0&&<div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">DMI</div><div className={`text-center text-xs font-bold font-mono px-2 py-1 rounded ${dmiPct>102?'bg-status-red/10 text-status-red':dmiPct>95?'bg-brand/10 text-brand':'bg-status-amber/10 text-status-amber'}`}>Actual {actualDMI.toFixed(1)} / Predicted {predictedDMI.toFixed(1)} = {dmiPct.toFixed(0)}%</div></div>}
+              <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Energy Systems</div>
+              {[['ME',me.toFixed(1)+' MJ/kg'],['DE',de.toFixed(1)+' MJ/kg'],['TDN',tdn.toFixed(1)+'%'],['NEl',nel.toFixed(1)+' MJ/kg'],['NEm',nem.toFixed(1)+' MJ/kg'],['NEg',neg.toFixed(1)+' MJ/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{v}</span></div>))}</div>
               <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Methane</div>{[['CH\u2084',methane.ch4_g.toFixed(0)+' g/d'],['CH\u2084/kg DMI',methane.ch4_int.toFixed(1)+' g/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono text-text-dim">{v}</span></div>))}</div>
             </>:<><div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">Amino Acids</div>{[['Lysine',lys],['Methionine',met2],['Threonine',thr]].map(([l,v])=>(<div key={l as string} className="flex justify-between py-1"><span className="text-xs text-text-muted">{l}</span><span className="text-sm font-mono font-bold text-text-dim">{(v as number).toFixed(3)}%</span></div>))}</>}
           </div>}
@@ -417,53 +420,16 @@ export default function FormulaBuilderPage() {
 
       {/* ── OPTIMIZER ────────────────────────────────── */}
       {showOptimizer&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowOptimizer(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-2xl p-6 shadow-2xl max-h-[80vh] overflow-auto" onClick={e=>e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><Zap size={18} className="text-status-amber"/><div><div className="text-lg font-bold text-text">Least-Cost Optimizer</div><div className="text-2xs text-text-ghost">Minimise feed cost while meeting nutrient constraints</div></div></div><button onClick={()=>setShowOptimizer(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
-
+        <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><Zap size={18} className="text-status-amber"/><div><div className="text-lg font-bold text-text">Least-Cost Optimizer</div><div className="text-2xs text-text-ghost">Coordinate descent + fine-tuning algorithm</div></div></div><button onClick={()=>setShowOptimizer(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
         <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">Nutrient Constraints<span className="flex-1 h-px bg-border"/></div>
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          {optConstraints.map((c, i) => (
-            <div key={c.key} className={`flex items-center gap-2 p-2.5 rounded-lg border ${c.enabled?'border-brand/30 bg-brand/5':'border-border bg-surface-bg'}`}>
-              <input type="checkbox" checked={c.enabled} onChange={e=>{const u=[...optConstraints];u[i]={...u[i],enabled:e.target.checked};setOptConstraints(u)}} className="rounded"/>
-              <span className="text-xs font-semibold text-text-dim w-20">{c.label}</span>
-              <input type="number" value={c.min} step="0.1" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],min:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/>
-              <span className="text-2xs text-text-ghost">to</span>
-              <input type="number" value={c.max} step="0.1" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],max:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/>
-            </div>
-          ))}
-        </div>
-
+        <div className="grid grid-cols-2 gap-2 mb-4">{optConstraints.map((c, i) => (<div key={c.key} className={`flex items-center gap-2 p-2.5 rounded-lg border ${c.enabled?'border-brand/30 bg-brand/5':'border-border bg-surface-bg'}`}><input type="checkbox" checked={c.enabled} onChange={e=>{const u=[...optConstraints];u[i]={...u[i],enabled:e.target.checked};setOptConstraints(u)}} className="rounded"/><span className="text-xs font-semibold text-text-dim w-20">{c.label}</span><input type="number" value={c.min} step="0.1" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],min:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/><span className="text-2xs text-text-ghost">to</span><input type="number" value={c.max} step="0.1" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],max:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/></div>))}</div>
         <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">Ingredient Limits<span className="flex-1 h-px bg-border"/></div>
-        <div className="text-2xs text-text-ghost mb-2">Locked ingredients will be held at their current value. Others will vary between 0% and their max inclusion.</div>
-        <div className="grid grid-cols-3 gap-1.5 mb-4">
-          {ings.map((fi, i) => (
-            <div key={fi.id||i} className="flex items-center gap-1.5 text-2xs">
-              <span className={`w-3 h-3 rounded ${fi.locked?'bg-status-amber':'bg-brand/20'}`}/>
-              <span className="flex-1 truncate text-text-dim">{fi.ingredient?.name}</span>
-              <span className="font-mono text-text-ghost">{fi.locked?fi.inclusion_pct.toFixed(1)+'% \uD83D\uDD12':'0-'+(fi.ingredient?.max_inclusion_pct||60)+'%'}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-2 mb-4">
-          <button onClick={handleRunOptimizer} disabled={optRunning||ings.length===0} className="btn btn-primary flex-1 justify-center disabled:opacity-50">
-            {optRunning?<><Loader2 size={14} className="animate-spin"/> Optimizing...</>:<><Zap size={14}/> Run Optimizer</>}
-          </button>
-        </div>
-
+        <div className="text-2xs text-text-ghost mb-2">Locked ingredients held at current value.</div>
+        <div className="grid grid-cols-3 gap-1.5 mb-4">{ings.map((fi, i) => (<div key={fi.id||i} className="flex items-center gap-1.5 text-2xs"><span className={`w-3 h-3 rounded ${fi.locked?'bg-status-amber':'bg-brand/20'}`}/><span className="flex-1 truncate text-text-dim">{fi.ingredient?.name}</span><span className="font-mono text-text-ghost">{fi.locked?fi.inclusion_pct.toFixed(1)+'% \uD83D\uDD12':'0-'+(fi.ingredient?.max_inclusion_pct||60)+'%'}</span></div>))}</div>
+        <div className="flex gap-2 mb-4"><button onClick={handleRunOptimizer} disabled={optRunning||ings.length===0} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{optRunning?<><Loader2 size={14} className="animate-spin"/> Optimizing...</>:<><Zap size={14}/> Run Optimizer</>}</button></div>
         {optResult&&<div className={`p-4 rounded-lg border ${optResult.feasible?'border-brand/30 bg-brand/5':'border-status-red/30 bg-status-red/5'}`}>
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`text-sm font-bold ${optResult.feasible?'text-brand':'text-status-red'}`}>{optResult.feasible?'\u2713 Feasible diet found':'\u2717 No feasible solution'}</span>
-            {optResult.improved&&<span className="text-2xs px-1.5 py-0.5 rounded bg-brand/10 text-brand font-bold font-mono">IMPROVED</span>}
-          </div>
-          {optResult.feasible&&<>
-            <div className="text-xs text-text-muted mb-2">Optimized cost: <strong className="text-status-amber font-mono">${optResult.cost.toFixed(0)}/t</strong> (current: ${costAF.toFixed(0)}/t, saving: <strong className="text-brand">${(costAF-optResult.cost).toFixed(0)}/t</strong>)</div>
-            <div className="grid grid-cols-3 gap-1.5 mb-3">
-              {optResult.solution.map((pct: number, i: number) => pct > 0 ? (
-                <div key={i} className="flex justify-between text-2xs"><span className="text-text-dim truncate">{ings[i]?.ingredient?.name}</span><span className="font-mono font-bold text-text-dim">{pct.toFixed(1)}%</span></div>
-              ) : null)}
-            </div>
-            <button onClick={applyOptResult} className="btn btn-primary btn-sm w-full justify-center">Apply Optimized Diet</button>
-          </>}
+          <div className="flex items-center gap-2 mb-2"><span className={`text-sm font-bold ${optResult.feasible?'text-brand':'text-status-red'}`}>{optResult.feasible?'\u2713 Feasible diet found':'\u2717 No feasible solution'}</span>{optResult.improved&&<span className="text-2xs px-1.5 py-0.5 rounded bg-brand/10 text-brand font-bold font-mono">IMPROVED</span>}</div>
+          {optResult.feasible&&<><div className="text-xs text-text-muted mb-2">Cost: <strong className="text-status-amber font-mono">${optResult.cost.toFixed(0)}/t</strong> (was ${costAF.toFixed(0)}/t, saving <strong className="text-brand">${(costAF-optResult.cost).toFixed(0)}/t</strong>)</div><div className="grid grid-cols-3 gap-1.5 mb-3">{optResult.solution.map((pct: number, i: number) => pct > 0 ? (<div key={i} className="flex justify-between text-2xs"><span className="text-text-dim truncate">{ings[i]?.ingredient?.name}</span><span className="font-mono font-bold text-text-dim">{pct.toFixed(1)}%</span></div>) : null)}</div><button onClick={applyOptResult} className="btn btn-primary btn-sm w-full justify-center">Apply Optimized Diet</button></>}
           {!optResult.feasible&&<div className="text-xs text-text-ghost">Try relaxing constraints or adding more ingredients.</div>}
         </div>}
       </div></div>}
@@ -471,40 +437,11 @@ export default function FormulaBuilderPage() {
       {/* ── COMPARE ──────────────────────────────────── */}
       {showCompare&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowCompare(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-4xl p-6 shadow-2xl max-h-[80vh] overflow-auto" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><GitCompare size={18} className="text-brand"/><div><div className="text-lg font-bold text-text">Diet Compare</div><div className="text-2xs text-text-ghost">Save snapshots and compare side by side</div></div></div><button onClick={()=>setShowCompare(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
-
-        {/* Save buttons */}
-        <div className="flex gap-2 mb-4">
-          {[0,1,2,3].map(i=>(<button key={i} onClick={()=>saveToCompareSlot(i)} className="btn btn-ghost btn-sm flex-1 justify-center">Save to Slot {i+1}</button>))}
-        </div>
-
-        {/* Current diet */}
+        <div className="flex gap-2 mb-4">{[0,1,2,3].map(i=>(<button key={i} onClick={()=>saveToCompareSlot(i)} className="btn btn-ghost btn-sm flex-1 justify-center">Save to Slot {i+1}</button>))}</div>
         <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">Current Diet<span className="flex-1 h-px bg-border"/></div>
-        <div className="grid grid-cols-8 gap-2 mb-4 p-3 bg-surface-bg rounded-lg border border-brand/20">
-          {[['CP',cp.toFixed(1)+'%'],['ME',me.toFixed(1)],['NDF',ndf.toFixed(1)+'%'],['F:C',fcRatio],['MP bal',mpBalance.toFixed(1)],['Cost/t','$'+costAF.toFixed(0)],['Margin','$'+marginPerDay.toFixed(2)],['peNDF',peNDF.toFixed(1)+'%']].map(([l,v])=>(
-            <div key={l as string} className="text-center"><div className="text-[8px] text-text-ghost uppercase">{l}</div><div className="text-xs font-mono font-bold text-brand">{v}</div></div>
-          ))}
-        </div>
-
-        {/* Saved diets */}
+        <div className="grid grid-cols-8 gap-2 mb-4 p-3 bg-surface-bg rounded-lg border border-brand/20">{[['CP',cp.toFixed(1)+'%'],['ME',me.toFixed(1)],['NDF',ndf.toFixed(1)+'%'],['F:C',fcRatio],['MP bal',mpBalance.toFixed(1)],['Cost/t','$'+costAF.toFixed(0)],['Margin','$'+marginPerDay.toFixed(2)],['peNDF',peNDF.toFixed(1)+'%']].map(([l,v])=>(<div key={l as string} className="text-center"><div className="text-[8px] text-text-ghost uppercase">{l}</div><div className="text-xs font-mono font-bold text-brand">{v}</div></div>))}</div>
         <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">Saved Diets<span className="flex-1 h-px bg-border"/></div>
-        <div className="grid grid-cols-4 gap-3">
-          {compareSlots.map((slot, i) => (
-            <div key={i} className={`rounded-lg border p-3 ${slot?'border-border bg-surface-card':'border-border/30 bg-surface-bg/50'}`}>
-              <div className="text-2xs font-bold text-text-ghost uppercase mb-2">Slot {i+1}</div>
-              {slot?<>
-                <div className="text-xs font-semibold text-text-dim mb-2">{slot.name}</div>
-                {[['CP',slot.nutrients.cp?.toFixed(1)+'%'],['ME',slot.nutrients.me?.toFixed(1)],['NDF',slot.nutrients.ndf?.toFixed(1)+'%'],['F:C',slot.fc],['Cost','$'+slot.cost.toFixed(0)+'/t'],['Margin','$'+slot.margin.toFixed(2)+'/d']].map(([l,v])=>(
-                  <div key={l as string} className="flex justify-between py-0.5"><span className="text-[9px] text-text-ghost">{l}</span><span className="text-[9px] font-mono font-bold text-text-dim">{v}</span></div>
-                ))}
-                <div className="text-[9px] text-text-ghost mt-2 mb-2">{slot.ings.filter((si: any)=>si.pct>0).map((si: any)=>`${si.name}: ${si.pct.toFixed(1)}%`).join(', ')}</div>
-                <div className="flex gap-1">
-                  <button onClick={()=>recallFromSlot(i)} className="btn btn-primary btn-sm flex-1 justify-center text-2xs"><RotateCcw size={10}/> Recall</button>
-                  <button onClick={()=>clearSlot(i)} className="btn btn-ghost btn-sm text-2xs"><X size={10}/></button>
-                </div>
-              </>:<div className="text-2xs text-text-ghost text-center py-6">Empty — save current diet here</div>}
-            </div>
-          ))}
-        </div>
+        <div className="grid grid-cols-4 gap-3">{compareSlots.map((slot, i) => (<div key={i} className={`rounded-lg border p-3 ${slot?'border-border bg-surface-card':'border-border/30 bg-surface-bg/50'}`}><div className="text-2xs font-bold text-text-ghost uppercase mb-2">Slot {i+1}</div>{slot?<><div className="text-xs font-semibold text-text-dim mb-2">{slot.name}</div>{[['CP',slot.nutrients.cp?.toFixed(1)+'%'],['ME',slot.nutrients.me?.toFixed(1)],['NDF',slot.nutrients.ndf?.toFixed(1)+'%'],['F:C',slot.fc],['Cost','$'+slot.cost.toFixed(0)+'/t'],['Margin','$'+slot.margin.toFixed(2)+'/d']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[9px] text-text-ghost">{l}</span><span className="text-[9px] font-mono font-bold text-text-dim">{v}</span></div>))}<div className="text-[9px] text-text-ghost mt-2 mb-2">{slot.ings.filter((si: any)=>si.pct>0).map((si: any)=>`${si.name}: ${si.pct.toFixed(1)}%`).join(', ')}</div><div className="flex gap-1"><button onClick={()=>recallFromSlot(i)} className="btn btn-primary btn-sm flex-1 justify-center text-2xs"><RotateCcw size={10}/> Recall</button><button onClick={()=>clearSlot(i)} className="btn btn-ghost btn-sm text-2xs"><X size={10}/></button></div></>:<div className="text-2xs text-text-ghost text-center py-6">Empty</div>}</div>))}</div>
       </div></div>}
 
       {/* ── AI ────────────────────────────────────────── */}
