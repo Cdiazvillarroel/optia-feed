@@ -52,7 +52,17 @@ function runOptimizer(
   const n = ings.length
   if (n === 0) return { solution: [], cost: 0, feasible: false, improved: false }
 
-  const current = ings.map(fi => fi.inclusion_pct || 0)
+  let current = ings.map(fi => fi.inclusion_pct || 0)
+  const currentTotal = current.reduce((s, v) => s + v, 0)
+  if (currentTotal < 1) {
+    const unlocked = ings.map((fi, i) => fi.locked ? -1 : i).filter(i => i >= 0)
+    if (unlocked.length === 0) return { solution: current, cost: 0, feasible: false, improved: false }
+    const each = 100 / unlocked.length
+    current = ings.map((fi, i) => fi.locked ? fi.inclusion_pct : each)
+  } else if (currentTotal < 95 || currentTotal > 105) {
+    const scale = 100 / currentTotal
+    current = current.map((v, i) => ings[i].locked ? v : v * scale)
+  }
   const originalCost = calcSolCost(current)
 
   function calcNutSol(sol: number[], key: string): number {
@@ -282,7 +292,7 @@ export default function FormulaBuilderPage() {
     setTimeout(() => { const result = runOptimizer(ings, prices, optConstraints, ingC, 8000); setOptResult(result); setOptRunning(false) }, 100)
   }
 
-  function applyOptResult() { if (!optResult?.solution) return; const updated = ings.map((fi, idx) => ({ ...fi, inclusion_pct: optResult.solution[idx] })); setIngs(updated); setSaved(false); setShowOptimizer(false); setOptResult(null) }
+  function applyOptResult() { if (!optResult?.solution) return; const updated = ings.map((fi, idx) => ({ ...fi, inclusion_pct: optResult.solution[idx] || 0 })); setIngs(updated); setSaved(false); setShowOptimizer(false) }
 
   // ── COMPARE ────────────────────────────────────────────
   function saveToCompareSlot(slotIdx: number) { const slots = [...compareSlots]; slots[slotIdx] = { name: `Diet ${slotIdx+1} — ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`, ings: ings.map(fi => ({ name: fi.ingredient?.name, pct: fi.inclusion_pct, id: fi.ingredient_id })), production: { ...production }, nutrients: { cp, me, ndf, ee, ca, p: pp, starch, caP, peNDF }, cost: costAF, margin: marginPerDay, mp: mpData.mpSupply, fc: fcRatio, timestamp: new Date() }; setCompareSlots(slots) }
@@ -429,7 +439,7 @@ export default function FormulaBuilderPage() {
         <div className="flex gap-2 mb-4"><button onClick={handleRunOptimizer} disabled={optRunning||ings.length===0} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{optRunning?<><Loader2 size={14} className="animate-spin"/> Optimizing...</>:<><Zap size={14}/> Run Optimizer</>}</button></div>
         {optResult&&<div className={`p-4 rounded-lg border ${optResult.feasible?'border-brand/30 bg-brand/5':'border-status-red/30 bg-status-red/5'}`}>
           <div className="flex items-center gap-2 mb-2"><span className={`text-sm font-bold ${optResult.feasible?'text-brand':'text-status-red'}`}>{optResult.feasible?'\u2713 Feasible diet found':'\u2717 No feasible solution'}</span>{optResult.improved&&<span className="text-2xs px-1.5 py-0.5 rounded bg-brand/10 text-brand font-bold font-mono">IMPROVED</span>}</div>
-          {optResult.feasible&&<><div className="text-xs text-text-muted mb-2">Cost: <strong className="text-status-amber font-mono">${optResult.cost.toFixed(0)}/t</strong> (was ${costAF.toFixed(0)}/t, saving <strong className="text-brand">${(costAF-optResult.cost).toFixed(0)}/t</strong>)</div><div className="grid grid-cols-3 gap-1.5 mb-3">{optResult.solution.map((pct: number, i: number) => pct > 0 ? (<div key={i} className="flex justify-between text-2xs"><span className="text-text-dim truncate">{ings[i]?.ingredient?.name}</span><span className="font-mono font-bold text-text-dim">{pct.toFixed(1)}%</span></div>) : null)}</div><button onClick={applyOptResult} className="btn btn-primary btn-sm w-full justify-center">Apply Optimized Diet</button></>}
+          {optResult.feasible&&<><div className="text-xs text-text-muted mb-2">Cost: <strong className="text-status-amber font-mono">${optResult.cost.toFixed(0)}/t</strong> (was ${costAF.toFixed(0)}/t, saving <strong className="text-brand">${(costAF-optResult.cost).toFixed(0)}/t</strong>)</div><div className="grid grid-cols-3 gap-1.5 mb-3">{optResult.solution.map((pct: number, i: number) => (<div key={i} className={`flex justify-between text-2xs ${pct > 0 ? '' : 'opacity-30'}`}><span className="text-text-dim truncate">{ings[i]?.ingredient?.name}</span><span className="font-mono font-bold text-text-dim">{pct.toFixed(1)}%</span></div>))}</div><button onClick={applyOptResult} className="btn btn-primary btn-sm w-full justify-center">Apply Optimized Diet</button></>}
           {!optResult.feasible&&<div className="text-xs text-text-ghost">Try relaxing constraints or adding more ingredients.</div>}
         </div>}
       </div></div>}
