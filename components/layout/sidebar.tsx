@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Home, Users, Beef, Database, FlaskConical, Radio,
+  Home, Users, Tag, Database, FlaskConical, Radio,
   BarChart3, Settings, Sparkles, ChevronLeft, ClipboardList
 } from 'lucide-react'
 import { useState } from 'react'
@@ -13,7 +13,7 @@ const navItems = [
   { href: '/workspace', label: 'Workspace', icon: Home },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/crm', label: 'CRM', icon: ClipboardList },
-  { href: '/animals', label: 'Animals', icon: Beef },
+  { href: '/animals', label: 'Animals', icon: Tag },
   { href: '/ingredients', label: 'Ingredients', icon: Database },
   { href: '/formulas', label: 'Formulas', icon: FlaskConical },
   { href: '/hub', label: 'Hub', icon: Radio },
