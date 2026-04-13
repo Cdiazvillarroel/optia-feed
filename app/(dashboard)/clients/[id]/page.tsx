@@ -19,17 +19,24 @@ export default function ClientDetailPage() {
   const [animals, setAnimals] = useState<any[]>([])
   const [formulas, setFormulas] = useState<any[]>([])
   const [showAddAnimal, setShowAddAnimal] = useState(false)
+  const [showEditAnimal, setShowEditAnimal] = useState(false)
+  const [editingAnimal, setEditingAnimal] = useState<any>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const [editSpecies, setEditSpecies] = useState<string[]>([])
   const [animalSpecies, setAnimalSpecies] = useState('cattle')
+  const [editAnimalSpecies, setEditAnimalSpecies] = useState('cattle')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadData() }, [params.id])
 
-  async function loadData() {
+  async function getSupabase() {
     const { createClient } = await import('@/lib/supabase/client')
-    const supabase = createClient()
+    return createClient()
+  }
+
+  async function loadData() {
+    const supabase = await getSupabase()
     const { data: c } = await supabase.from('nutrition_clients').select('*').eq('id', params.id).single()
     if (!c) { router.push('/clients'); return }
     setClient(c)
@@ -45,8 +52,7 @@ export default function ClientDetailPage() {
     e.preventDefault()
     setLoading(true)
     const form = new FormData(e.currentTarget)
-    const { createClient } = await import('@/lib/supabase/client')
-    const supabase = createClient()
+    const supabase = await getSupabase()
     await supabase.from('client_animals').insert({
       client_id: params.id,
       name: form.get('name') as string,
@@ -64,12 +70,39 @@ export default function ClientDetailPage() {
     loadData()
   }
 
+  function openEditAnimal(a: any) {
+    setEditingAnimal(a)
+    setEditAnimalSpecies(a.species || client?.species?.[0] || 'cattle')
+    setShowEditAnimal(true)
+  }
+
+  async function handleEditAnimal(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setLoading(true)
+    const form = new FormData(e.currentTarget)
+    const supabase = await getSupabase()
+    await supabase.from('client_animals').update({
+      name: form.get('name') as string,
+      species: editAnimalSpecies,
+      breed: form.get('breed') as string || null,
+      production_stage: form.get('production_stage') as string,
+      count: parseInt(form.get('count') as string) || 0,
+      avg_weight_kg: parseFloat(form.get('avg_weight_kg') as string) || null,
+      target_adg_kg: parseFloat(form.get('target_adg_kg') as string) || null,
+      target_milk_yield_l: parseFloat(form.get('target_milk_yield_l') as string) || null,
+      dmi_kg: parseFloat(form.get('dmi_kg') as string) || null,
+    }).eq('id', editingAnimal.id)
+    setShowEditAnimal(false)
+    setEditingAnimal(null)
+    setLoading(false)
+    loadData()
+  }
+
   async function handleUpdate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
     const form = new FormData(e.currentTarget)
-    const { createClient } = await import('@/lib/supabase/client')
-    const supabase = createClient()
+    const supabase = await getSupabase()
     await supabase.from('nutrition_clients').update({
       name: form.get('name') as string,
       species: editSpecies,
@@ -85,15 +118,13 @@ export default function ClientDetailPage() {
   }
 
   async function handleDelete() {
-    const { createClient } = await import('@/lib/supabase/client')
-    const supabase = createClient()
+    const supabase = await getSupabase()
     await supabase.from('nutrition_clients').update({ active: false }).eq('id', params.id)
     router.push('/clients')
   }
 
   async function handleDeleteAnimal(id: string) {
-    const { createClient } = await import('@/lib/supabase/client')
-    const supabase = createClient()
+    const supabase = await getSupabase()
     await supabase.from('client_animals').delete().eq('id', id)
     loadData()
   }
@@ -141,7 +172,11 @@ export default function ClientDetailPage() {
             </div>
             <span className="text-sm text-text-muted font-mono">{a.count} hd</span>
             <span className="text-sm text-text-muted font-mono">{a.avg_weight_kg ? a.avg_weight_kg+'kg' : '\u2014'}</span>
+            {a.target_milk_yield_l && <span className="text-sm text-text-muted font-mono">{a.target_milk_yield_l} L/d</span>}
+            {a.target_adg_kg && <span className="text-sm text-text-muted font-mono">{a.target_adg_kg} kg/d</span>}
+            {a.dmi_kg && <span className="text-sm text-text-muted font-mono">DMI {a.dmi_kg}</span>}
             <span className="text-sm text-status-blue">{a.formula?.name || '\u2014'}</span>
+            <button onClick={() => openEditAnimal(a)} className="opacity-0 group-hover:opacity-100 text-text-ghost hover:text-brand transition-all bg-transparent border-none cursor-pointer"><Edit2 size={14} /></button>
             <button onClick={() => handleDeleteAnimal(a.id)} className="opacity-0 group-hover:opacity-100 text-text-ghost hover:text-status-red transition-all bg-transparent border-none cursor-pointer"><Trash2 size={14} /></button>
           </div>
         )) : <div className="px-4 py-8 text-center text-sm text-text-ghost">No animal groups yet.</div>}
@@ -159,6 +194,8 @@ export default function ClientDetailPage() {
           </Link>
         )) : <div className="px-4 py-8 text-center text-sm text-text-ghost">No formulas yet.</div>}
       </div>
+
+      {/* ADD ANIMAL */}
       {showAddAnimal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowAddAnimal(false)}>
           <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -187,6 +224,38 @@ export default function ClientDetailPage() {
           </div>
         </div>
       )}
+
+      {/* EDIT ANIMAL */}
+      {showEditAnimal && editingAnimal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowEditAnimal(false)}>
+          <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5"><h2 className="text-xl font-bold text-text">Edit Animal Group</h2><button onClick={() => setShowEditAnimal(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button></div>
+            <form onSubmit={handleEditAnimal} className="flex flex-col gap-3.5">
+              <div><label className="text-xs font-semibold text-text-muted block mb-1">Group Name *</label><input name="name" required defaultValue={editingAnimal.name} className="input" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs font-semibold text-text-muted block mb-1">Species</label><select value={editAnimalSpecies} onChange={(e) => setEditAnimalSpecies(e.target.value)} className="input">{(client.species as string[]).map((sp: string) => (<option key={sp} value={sp}>{sp}</option>))}</select></div>
+                <div><label className="text-xs font-semibold text-text-muted block mb-1">Stage *</label><select name="production_stage" required defaultValue={editingAnimal.production_stage} className="input">{(STAGES[editAnimalSpecies]||[]).map((st: string) => (<option key={st} value={st}>{st}</option>))}</select></div>
+              </div>
+              <div><label className="text-xs font-semibold text-text-muted block mb-1">Breed</label><input name="breed" defaultValue={editingAnimal.breed||''} className="input" /></div>
+              <div className="grid grid-cols-3 gap-3">
+                <div><label className="text-xs font-semibold text-text-muted block mb-1">Head Count *</label><input name="count" type="number" required min="1" defaultValue={editingAnimal.count} className="input" /></div>
+                <div><label className="text-xs font-semibold text-text-muted block mb-1">Avg Weight (kg)</label><input name="avg_weight_kg" type="number" step="0.1" defaultValue={editingAnimal.avg_weight_kg||''} className="input" /></div>
+                <div><label className="text-xs font-semibold text-text-muted block mb-1">DMI (kg/d)</label><input name="dmi_kg" type="number" step="0.1" defaultValue={editingAnimal.dmi_kg||''} className="input" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs font-semibold text-text-muted block mb-1">Target ADG (kg/d)</label><input name="target_adg_kg" type="number" step="0.001" defaultValue={editingAnimal.target_adg_kg||''} className="input" /></div>
+                <div><label className="text-xs font-semibold text-text-muted block mb-1">Target Milk (L/d)</label><input name="target_milk_yield_l" type="number" step="0.1" defaultValue={editingAnimal.target_milk_yield_l||''} className="input" /></div>
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button type="button" onClick={() => setShowEditAnimal(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
+                <button type="submit" disabled={loading} className="btn btn-primary flex-1 justify-center">{loading?'Saving...':'Save Changes'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT CLIENT */}
       {showEdit && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowEdit(false)}>
           <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -212,6 +281,8 @@ export default function ClientDetailPage() {
           </div>
         </div>
       )}
+
+      {/* DELETE CLIENT */}
       {showDelete && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowDelete(false)}>
           <div className="bg-surface-card rounded-xl border border-border w-full max-w-sm p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
