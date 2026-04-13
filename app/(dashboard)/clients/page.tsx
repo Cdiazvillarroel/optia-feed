@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { Plus, Search, X } from 'lucide-react'
 
 export default function ClientsPage() {
@@ -12,11 +11,8 @@ export default function ClientsPage() {
   const [showForm, setShowForm] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([])
-  const router = useRouter()
 
-  useEffect(() => {
-    loadClients()
-  }, [])
+  useEffect(() => { loadClients() }, [])
 
   async function loadClients() {
     const { createClient } = await import('@/lib/supabase/client')
@@ -46,9 +42,12 @@ export default function ClientsPage() {
     const form = new FormData(e.currentTarget)
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setFormLoading(false); return }
     const { data, error } = await supabase
       .from('nutrition_clients')
       .insert({
+        nutritionist_id: user.id,
         name: form.get('name') as string,
         species: selectedSpecies,
         contact_name: form.get('contact_name') as string || null,
@@ -60,10 +59,11 @@ export default function ClientsPage() {
       .select()
       .single()
     setFormLoading(false)
-    if (!error && data) {
+    if (error) { console.error('Error:', error.message); return }
+    if (data) {
       setShowForm(false)
       setSelectedSpecies([])
-      router.push(`/clients/${data.id}`)
+      loadClients()
     }
   }
 
@@ -99,8 +99,7 @@ export default function ClientsPage() {
             </div>
             <div className="flex gap-1">
               {(c.species as string[]).map((s) => (
-                <span key={s} className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded text-xs font-bold font-mono
-                  ${s==='cattle'?'bg-species-cattle/10 text-species-cattle':s==='pig'?'bg-species-pig/10 text-species-pig':s==='poultry'?'bg-species-poultry/10 text-species-poultry':'bg-species-sheep/10 text-species-sheep'}`}>
+                <span key={s} className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded text-xs font-bold font-mono ${s==='cattle'?'bg-species-cattle/10 text-species-cattle':s==='pig'?'bg-species-pig/10 text-species-pig':s==='poultry'?'bg-species-poultry/10 text-species-poultry':'bg-species-sheep/10 text-species-sheep'}`}>
                   {s==='cattle'?'C':s==='pig'?'P':s==='poultry'?'Pk':'S'}
                 </span>
               ))}
