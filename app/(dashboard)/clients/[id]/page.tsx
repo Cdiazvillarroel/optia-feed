@@ -42,7 +42,7 @@ export default function ClientDetailPage() {
     setClient(c)
     setEditSpecies(c.species || [])
     setAnimalSpecies(c.species?.[0] || 'cattle')
-    const { data: a } = await supabase.from('client_animals').select('*, formula:formulas!client_animals_formula_id_fkey(id, name, status)')
+    const { data: a } = await supabase.from('client_animals').select('*, formulas!formulas_animal_group_id_fkey(id, name, status)').eq('client_id', params.id).order('name')
     setAnimals(a || [])
     const { data: f } = await supabase.from('formulas').select('*').eq('client_id', params.id).not('status','eq','archived').order('updated_at', { ascending: false })
     setFormulas(f || [])
@@ -164,7 +164,9 @@ export default function ClientDetailPage() {
       )}
       <div className="card mb-4">
         <div className="card-header"><span className="text-base font-bold text-text-dim">Animal Groups</span><button onClick={() => setShowAddAnimal(true)} className="btn btn-ghost btn-sm"><Plus size={14} /> Add Group</button></div>
-        {animals.length > 0 ? animals.map((a) => (
+        {animals.length > 0 ? animals.map((a) => {
+          const linkedFormula = a.formulas?.[0] || null
+          return (
           <div key={a.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-border/5 group">
             <div className="flex-1">
               <div className="text-base font-semibold text-text-dim">{a.name}</div>
@@ -175,16 +177,19 @@ export default function ClientDetailPage() {
             {a.target_milk_yield_l && <span className="text-sm text-text-muted font-mono">{a.target_milk_yield_l} L/d</span>}
             {a.target_adg_kg && <span className="text-sm text-text-muted font-mono">{a.target_adg_kg} kg/d</span>}
             {a.dmi_kg && <span className="text-sm text-text-muted font-mono">DMI {a.dmi_kg}</span>}
-            <span className="text-sm text-status-blue">{a.formula?.name || '\u2014'}</span>
+            {linkedFormula
+              ? <Link href={`/formulas/${linkedFormula.id}`} className="text-sm text-status-blue hover:underline no-underline">{linkedFormula.name}</Link>
+              : <span className="text-sm text-text-ghost">{'\u2014'}</span>
+            }
             <button onClick={() => openEditAnimal(a)} className="opacity-0 group-hover:opacity-100 text-text-ghost hover:text-brand transition-all bg-transparent border-none cursor-pointer"><Edit2 size={14} /></button>
             <button onClick={() => handleDeleteAnimal(a.id)} className="opacity-0 group-hover:opacity-100 text-text-ghost hover:text-status-red transition-all bg-transparent border-none cursor-pointer"><Trash2 size={14} /></button>
           </div>
-        )) : <div className="px-4 py-8 text-center text-sm text-text-ghost">No animal groups yet.</div>}
+        )}) : <div className="px-4 py-8 text-center text-sm text-text-ghost">No animal groups yet.</div>}
       </div>
       <div className="card">
         <div className="card-header"><span className="text-base font-bold text-text-dim">Formulas</span></div>
         {formulas.length > 0 ? formulas.map((f) => (
-          <Link key={f.id} href={`/formulas/${f.id}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-border/5 hover:bg-[#253442] transition-colors no-underline">
+          <Link key={f.id} href={`/formulas/${f.id}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-border/5 hover:bg-[#312B26] transition-colors no-underline">
             <div className="flex-1">
               <div className="text-base font-semibold text-text-dim">{f.name}</div>
               <div className="text-xs text-text-ghost capitalize">{f.species} &middot; {f.production_stage} &middot; v{f.version}</div>
