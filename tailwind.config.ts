@@ -49,7 +49,7 @@ const config: Config = {
           dim: '#E6DDD0',
           muted: '#A69D93',
           faint: '#5A5149',
-          ghost: '#3B342E',
+          ghost: '#6B6158',
         },
         status: {
           amber: '#C9A043',
