@@ -241,7 +241,7 @@ export default function FormulaBuilderPage() {
   const [stageName, setStageName] = useState('')
   const [safetyRules, setSafetyRules] = useState<any[]>([])
   const [prices, setPrices] = useState<Record<string,number>>({})
-  const [rightTab, setRightTab] = useState<'balance'|'rumen'|'cost'>('balance')
+  const [rightTab, setRightTab] = useState<'balance'|'rumen'|'chart'|'cost'>('balance')
   const [showAddIng, setShowAddIng] = useState(false)
   const [ingSearch, setIngSearch] = useState('')
   const [saving, setSaving] = useState(false)
@@ -495,7 +495,7 @@ export default function FormulaBuilderPage() {
 
         {/* Right Panel */}
         <div className="flex flex-col gap-0 overflow-hidden">
-          <div className="flex gap-px bg-border rounded overflow-hidden mb-2">{(['balance','rumen','cost'] as const).map(t=>(<button key={t} onClick={()=>setRightTab(t)} className={`flex-1 py-1 text-2xs font-bold uppercase text-center border-none cursor-pointer ${rightTab===t?'bg-brand text-white':'bg-surface-card text-text-ghost hover:text-text-muted'}`}>{t==='balance'?'\u2696 Balance':t==='rumen'?'\uD83E\uDDEC Rumen':'$ Margin'}</button>))}</div>
+          <div className="flex gap-px bg-border rounded overflow-hidden mb-2">{(['balance','rumen','chart','cost'] as const).map(t=>(<button key={t} onClick={()=>setRightTab(t)} className={`flex-1 py-1 text-2xs font-bold uppercase text-center border-none cursor-pointer ${rightTab===t?'bg-brand text-white':'bg-surface-card text-text-ghost hover:text-text-muted'}`}>{t==='balance'?'\u2696 Balance':t==='rumen'?'\uD83E\uDDEC Rumen':t==='chart'?'\uD83D\uDCCA Chart':'$ Margin'}</button>))}</div>
 
           {/* BALANCE */}
           {rightTab==='balance'&&<div className="card p-2.5 flex-1 overflow-auto">
@@ -522,6 +522,79 @@ export default function FormulaBuilderPage() {
               {[['ME',me.toFixed(1)+' MJ/kg'],['DE',de.toFixed(1)+' MJ/kg'],['TDN',tdn.toFixed(1)+'%'],['NEl',nel.toFixed(1)+' MJ/kg'],['NEm',nem.toFixed(1)+' MJ/kg'],['NEg',neg.toFixed(1)+' MJ/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{v}</span></div>))}</div>
               <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Methane</div>{[['CH\u2084',methane.ch4_g.toFixed(0)+' g/d'],['CH\u2084/kg DMI',methane.ch4_int.toFixed(1)+' g/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono text-text-dim">{v}</span></div>))}</div>
             </>:<><div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">Amino Acids</div>{[['Lysine',lys],['Methionine',met2],['Threonine',thr]].map(([l,v])=>(<div key={l as string} className="flex justify-between py-1"><span className="text-xs text-text-muted">{l}</span><span className="text-sm font-mono font-bold text-text-dim">{(v as number).toFixed(3)}%</span></div>))}</>}
+          </div>}
+
+          {/* CHART */}
+          {rightTab==='chart'&&<div className="card p-2.5 flex-1 overflow-auto">
+            {(()=>{
+              const nutrients=[
+                {l:'CP',v:cp,u:'%'},{l:'ME',v:me,u:'MJ'},{l:'NDF',v:ndf,u:'%'},
+                {l:'EE',v:ee,u:'%'},{l:'Ca',v:ca,u:'%'},{l:'P',v:pp,u:'%'},
+                {l:'Starch',v:starch,u:'%'}
+              ].map(nt=>{const req=findReq(nt.l.toLowerCase()==='ee'?'ee':nt.l.toLowerCase()==='p'?'p':nt.l.toLowerCase()); return{...nt,min:req?.min||0,max:req?.max||0,target:req?.target||(req?.min&&req?.max?(req.min+req.max)/2:0)}})
+              const hasReqs=nutrients.some(n=>n.target>0)
+              // Radar chart
+              const cx=145,cy=130,r=95,n=nutrients.length
+              const angle=(i:number)=>(Math.PI*2*i/n)-Math.PI/2
+              const toXY=(i:number,val:number,maxV:number)=>({x:cx+Math.cos(angle(i))*r*(maxV>0?Math.min(val/maxV,1.5):0),y:cy+Math.sin(angle(i))*r*(maxV>0?Math.min(val/maxV,1.5):0)})
+              const maxVals=nutrients.map(nt=>Math.max(nt.max||nt.target||nt.v,nt.v)*1.3)
+              const reqMinPts=nutrients.map((nt,i)=>toXY(i,nt.min,maxVals[i]))
+              const reqMaxPts=nutrients.map((nt,i)=>toXY(i,nt.max,maxVals[i]))
+              const actPts=nutrients.map((nt,i)=>toXY(i,nt.v,maxVals[i]))
+              const toPath=(pts:{x:number,y:number}[])=>pts.map((p,i)=>`${i===0?'M':'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')+'Z'
+              return(<>
+              {hasReqs&&<><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Radar — requirements vs formula</div>
+              <svg viewBox="0 0 290 260" className="w-full mb-3">
+                {/* Grid circles */}
+                {[0.25,0.5,0.75,1.0].map(s=>(<circle key={s} cx={cx} cy={cy} r={r*s} fill="none" stroke="var(--b)" strokeWidth="0.3" strokeDasharray="2 2"/>))}
+                {/* Spokes + labels */}
+                {nutrients.map((nt,i)=>{const end=toXY(i,maxVals[i],maxVals[i]);const lbl=toXY(i,maxVals[i]*1.18,maxVals[i]);return(<g key={nt.l}><line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="var(--b)" strokeWidth="0.3"/><text x={lbl.x} y={lbl.y} textAnchor="middle" dominantBaseline="central" fill="var(--s)" fontSize="9" fontWeight="500">{nt.l}</text></g>)})}
+                {/* Requirement range (green band) */}
+                <path d={toPath(reqMaxPts)} fill="#4CAF7D" fillOpacity="0.12" stroke="#4CAF7D" strokeWidth="0.5" strokeOpacity="0.3"/>
+                <path d={toPath(reqMinPts)} fill="var(--bg2)" fillOpacity="0.8" stroke="#4CAF7D" strokeWidth="0.5" strokeOpacity="0.3" strokeDasharray="2 2"/>
+                {/* Actual values polygon */}
+                <path d={toPath(actPts)} fill="#378ADD" fillOpacity="0.15" stroke="#378ADD" strokeWidth="1.5"/>
+                {/* Actual value dots */}
+                {actPts.map((p,i)=>{const nt=nutrients[i];const inRange=nt.min>0&&nt.max>0?nt.v>=nt.min&&nt.v<=nt.max:true;return(<circle key={i} cx={p.x} cy={p.y} r={3} fill={inRange?'#4CAF7D':'#E24B4A'} stroke="var(--bg2)" strokeWidth="1.5"/>)})}
+              </svg>
+              <div className="flex gap-3 justify-center mb-3 text-[9px]">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{background:'rgba(76,175,125,0.2)',border:'1px solid rgba(76,175,125,0.5)'}}/><span className="text-text-ghost">Requirement range</span></span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{background:'rgba(55,138,221,0.2)',border:'1px solid rgba(55,138,221,0.7)'}}/><span className="text-text-ghost">Actual formula</span></span>
+              </div></>}
+              {/* Bar comparison */}
+              <div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">{hasReqs?'Detail — ':''}actual vs target</div>
+              {nutrients.map(nt=>{
+                const pctOfTarget=nt.target>0?(nt.v/nt.target*100):0
+                const inRange=nt.min>0&&nt.max>0?nt.v>=nt.min&&nt.v<=nt.max:true
+                const barColor=!hasReqs?'#378ADD':inRange?'#4CAF7D':nt.v<(nt.min||0)?'#D4A843':'#E24B4A'
+                const maxBar=Math.max(nt.max||nt.target||nt.v,nt.v)*1.3
+                const barW=maxBar>0?Math.min(nt.v/maxBar*100,100):0
+                const minW=maxBar>0&&nt.min>0?nt.min/maxBar*100:0
+                const maxW=maxBar>0&&nt.max>0?nt.max/maxBar*100:100
+                return(<div key={nt.l} className="mb-2">
+                  <div className="flex justify-between items-baseline mb-0.5">
+                    <span className="text-[10px] font-semibold text-text-muted">{nt.l}</span>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[10px] font-mono font-bold" style={{color:barColor}}>{nt.v<1?nt.v.toFixed(3):nt.v.toFixed(1)}{nt.u}</span>
+                      {nt.target>0&&<span className="text-[9px] text-text-ghost">/ {nt.target<1?nt.target.toFixed(3):nt.target.toFixed(1)}</span>}
+                      {pctOfTarget>0&&<span className={`text-[9px] font-mono font-bold ${inRange?'text-brand':pctOfTarget<90?'text-status-amber':'text-status-red'}`}>{pctOfTarget.toFixed(0)}%</span>}
+                    </div>
+                  </div>
+                  <div className="relative h-3 bg-surface-deep rounded-sm overflow-hidden">
+                    {nt.min>0&&nt.max>0&&<div className="absolute h-full rounded-sm" style={{left:`${minW}%`,width:`${maxW-minW}%`,background:'rgba(76,175,125,0.12)'}}/>}
+                    <div className="h-full rounded-sm transition-all" style={{width:`${barW}%`,background:barColor,opacity:0.7}}/>
+                  </div>
+                </div>)})}
+              {/* Additional metrics */}
+              <div className="mt-2 pt-1.5 border-t border-border">
+                <div className="text-[10px] font-bold text-text-muted uppercase mb-1">Key ratios</div>
+                {[['F:C',fcRatio,foragePct<30?'#E24B4A':foragePct<40?'#D4A843':'#4CAF7D'],
+                  ['Ca:P',caP.toFixed(2)+':1',caP<1.5||caP>2.5?'#E24B4A':'#4CAF7D'],
+                  ['peNDF',peNDF.toFixed(1)+'%',peNDF<18?'#E24B4A':peNDF<22?'#D4A843':'#4CAF7D'],
+                  ['MP bal',mpBalance.toFixed(0)+' g/d',mpBalance<0?'#E24B4A':'#4CAF7D']
+                ].map(([l,v,c])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold" style={{color:c as string}}>{v}</span></div>))}
+              </div>
+            </>)})()}
           </div>}
 
           {/* COST/MARGIN */}
