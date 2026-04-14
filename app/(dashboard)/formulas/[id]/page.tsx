@@ -125,6 +125,77 @@ function defaultOptConstraints(mode: SpeciesMode): OptConstraint[] {
   ]
 }
 
+// ── INPUT VALIDATION ─────────────────────────────────────
+interface Warning { type: 'error'|'warning'|'info'; message: string; ingredient?: string }
+
+function validateFormula(ings: any[], safetyRules: any[], requirements: Req[], balanceNuts: {s:string,l:string,v:number,u:string}[], findReq: (s:string)=>Req|undefined, totalPctDM: number, speciesMode: SpeciesMode): Warning[] {
+  const warnings: Warning[] = []
+
+  // Total must be ~100%
+  if (ings.length > 0 && totalPctDM < 99.5) warnings.push({ type: 'error', message: `Total inclusion is ${totalPctDM.toFixed(1)}% — must be ~100% DM` })
+  if (totalPctDM > 100.5) warnings.push({ type: 'error', message: `Total inclusion is ${totalPctDM.toFixed(1)}% — exceeds 100% DM` })
+
+  // Per-ingredient checks
+  ings.forEach(fi => {
+    if (!fi.ingredient) return
+    const pct = fi.inclusion_pct || 0
+    const name = fi.ingredient.name
+
+    // Negative or zero (if added but 0)
+    if (pct < 0) warnings.push({ type: 'error', message: `${name} has negative inclusion (${pct}%)`, ingredient: name })
+
+    // Very high single ingredient
+    if (pct > 70) warnings.push({ type: 'warning', message: `${name} at ${pct.toFixed(1)}% is very high — check if intentional`, ingredient: name })
+
+    // Max inclusion from ingredient DB
+    if (fi.ingredient.max_inclusion_pct && pct > fi.ingredient.max_inclusion_pct) {
+      warnings.push({ type: 'warning', message: `${name} at ${pct.toFixed(1)}% exceeds max ${fi.ingredient.max_inclusion_pct}%`, ingredient: name })
+    }
+
+    // Match against safety rules
+    safetyRules.forEach(rule => {
+      if (!rule.ingredient_name) return
+      if (name.toLowerCase().includes(rule.ingredient_name.toLowerCase()) || rule.ingredient_name.toLowerCase().includes(name.toLowerCase().split(' ')[0])) {
+        if (rule.severity === 'danger' && pct > 0) {
+          warnings.push({ type: 'warning', message: `⚠ ${rule.title}: ${name} — ${rule.description?.substring(0, 100)}`, ingredient: name })
+        }
+      }
+    })
+  })
+
+  // Nutrient range violations
+  balanceNuts.forEach(nt => {
+    const req = findReq(nt.s)
+    if (!req) return
+    if (req.critical_min != null && nt.v < req.critical_min) warnings.push({ type: 'error', message: `${nt.l} at ${nt.v.toFixed(2)}${nt.u} is critically below minimum ${req.critical_min}${nt.u}` })
+    if (req.critical_max != null && nt.v > req.critical_max) warnings.push({ type: 'error', message: `${nt.l} at ${nt.v.toFixed(2)}${nt.u} critically exceeds maximum ${req.critical_max}${nt.u}` })
+    if (req.min != null && nt.v < req.min && nt.v > 0) warnings.push({ type: 'warning', message: `${nt.l} at ${nt.v.toFixed(2)}${nt.u} is below target range (${req.min}–${req.max})` })
+    if (req.max != null && nt.v > req.max) warnings.push({ type: 'warning', message: `${nt.l} at ${nt.v.toFixed(2)}${nt.u} exceeds target range (${req.min}–${req.max})` })
+  })
+
+  // Ruminant-specific
+  if (speciesMode === 'ruminant') {
+    const ndfVal = ings.reduce((s, fi) => s + (fi.ingredient?.ndf_pct||0)*(fi.inclusion_pct||0)/100, 0)
+    if (ndfVal > 0 && ndfVal < 25) warnings.push({ type: 'warning', message: `NDF at ${ndfVal.toFixed(1)}% is low — risk of subacute acidosis` })
+    const forPct = ings.reduce((s,fi)=>fi.ingredient?.particle_class==='forage'?s+(fi.inclusion_pct||0):s,0)
+    if (forPct > 0 && forPct < 25 && totalPctDM > 50) warnings.push({ type: 'warning', message: `Forage at ${forPct.toFixed(0)}% is low — minimum 30% recommended for rumen health` })
+  }
+
+  // Pig-specific
+  if (speciesMode === 'pig') {
+    const caVal = ings.reduce((s, fi) => s + (fi.ingredient?.ca_pct||0)*(fi.inclusion_pct||0)/100, 0)
+    const sttdP = ings.reduce((s, fi) => s + (fi.ingredient?.sttd_p_pct||0)*(fi.inclusion_pct||0)/100, 0)
+    if (sttdP > 0 && caVal / sttdP > 3.5) warnings.push({ type: 'warning', message: `Ca:STTD P ratio is ${(caVal/sttdP).toFixed(1)}:1 — exceeds 3.5:1 max (reduces P absorption)` })
+  }
+
+  return warnings
+}
+
+function clampInclusion(value: number): number {
+  if (isNaN(value)) return 0
+  return Math.max(0, Math.min(100, Math.round(value * 10) / 10))
+}
+
 // ── MAIN COMPONENT ───────────────────────────────────────
 export default function FormulaBuilderPage() {
   const params = useParams(); const router = useRouter()
@@ -290,16 +361,20 @@ export default function FormulaBuilderPage() {
     {s:'cp',l:'CP',v:cp,u:'%'},{s:'me',l:'ME',v:me,u:'MJ'},{s:'ndf',l:'NDF',v:ndf,u:'%'},
     {s:'ee',l:'EE',v:ee,u:'%'},{s:'ca',l:'Ca',v:ca,u:'%'},{s:'p',l:'P',v:pp,u:'%'},{s:'lys',l:'Lys',v:lys,u:'%'}
   ]
-
+  
+  const formulaWarnings = ings.length > 0 ? validateFormula(ings, safetyRules, requirements, balanceNuts, findReq, totalPctDM, speciesMode) : []
+  const errorCount = formulaWarnings.filter(w => w.type === 'error').length
+  const warningCount = formulaWarnings.filter(w => w.type === 'warning').length
+  
   let metC=0,warnC=0,failC=0
   balanceNuts.forEach(nt=>{const req=findReq(nt.s);if(!req)return;const inR=(req.min!=null&&req.max!=null)?nt.v>=req.min&&nt.v<=req.max:(req.min!=null?nt.v>=req.min:true)&&(req.max!=null?nt.v<=req.max:true);const crit=(req.critical_max!=null&&nt.v>req.critical_max)||(req.critical_min!=null&&nt.v<req.critical_min);if(crit)failC++;else if(inR)metC++;else warnC++})
 
   // ── ACTIONS ────────────────────────────────────────────
-  function updateIngPct(idx: number,pct: number){const u=[...ings];u[idx]={...u[idx],inclusion_pct:pct};setIngs(u);setSaved(false)}
+  function updateIngPct(idx: number,pct: number){const u=[...ings];u[idx]={...u[idx],inclusion_pct:clampInclusion(pct)};setIngs(u);setSaved(false)}
   function toggleLock(idx: number){const u=[...ings];u[idx]={...u[idx],locked:!u[idx].locked};setIngs(u)}
   function removeIng(idx: number){setIngs(ings.filter((_,i)=>i!==idx));setSaved(false)}
   async function addIngredient(ingId: string){if(ings.some(fi=>fi.ingredient_id===ingId))return;const supabase=await getSupabase();const{data}=await supabase.from('formula_ingredients').insert({formula_id:params.id,ingredient_id:ingId,inclusion_pct:0,locked:false}).select('*, ingredient:ingredients(*)').single();if(data){setIngs([...ings,data]);setShowAddIng(false);setSaved(false)}}
-  async function handleSave(){setSaving(true);const supabase=await getSupabase();await supabase.from('formula_ingredients').delete().eq('formula_id',params.id);if(ings.length>0){await supabase.from('formula_ingredients').insert(ings.map(fi=>({formula_id:params.id as string,ingredient_id:fi.ingredient_id,inclusion_pct:fi.inclusion_pct,inclusion_kg:fi.inclusion_pct/100*batchKg,cost_per_tonne:prices[fi.ingredient_id]||null,locked:fi.locked})))}
+   async function handleSave(){if(errorCount>0&&!confirm(`There are ${errorCount} errors in this formula (total ≠ 100%, critical nutrients). Save anyway?`))return;setSaving(true);const supabase=await getSupabase();await supabase.from('formula_ingredients').delete().eq('formula_id',params.id);if(ings.length>0){await supabase.from('formula_ingredients').insert(ings.map(fi=>({formula_id:params.id as string,ingredient_id:fi.ingredient_id,inclusion_pct:fi.inclusion_pct,inclusion_kg:fi.inclusion_pct/100*batchKg,cost_per_tonne:prices[fi.ingredient_id]||null,locked:fi.locked})))}
   await supabase.from('formulas').update({total_cost_per_tonne:costAF,total_cp_pct:cp,total_me_mj:isMono?primaryEnergy:me,total_income_per_day:incomePerDay,total_margin_per_day:marginPerDay}).eq('id',params.id);setSaving(false);setSaved(true)}
   async function updateStatus(s:string){const supabase=await getSupabase();await supabase.from('formulas').update({status:s,version:(formula.version||1)+(s==='approved'?1:0)}).eq('id',params.id);setFormula({...formula,status:s,version:(formula.version||1)+(s==='approved'?1:0)})}
   function handleExport(){
@@ -394,7 +469,19 @@ export default function FormulaBuilderPage() {
         <div className="flex-1"/><span className="font-mono font-bold text-status-amber">${costAF.toFixed(0)}/t</span>
         {marginPerDay!==0&&<span className={`font-mono font-bold ${marginPerDay>0?'text-brand':'text-status-red'}`}>${marginPerDay>0?'+':''}${marginPerDay.toFixed(2)}/d</span>}
       </div>
-
+        {/* Validation Warnings */}
+      {formulaWarnings.length > 0 && (
+        <div className="mb-2 px-2.5 py-1.5 rounded-lg border border-status-amber/30 bg-status-amber/5 max-h-24 overflow-auto">
+          {formulaWarnings.slice(0, 5).map((w, i) => (
+            <div key={i} className={`flex items-start gap-1.5 py-0.5 text-[10px] ${w.type === 'error' ? 'text-status-red font-bold' : w.type === 'warning' ? 'text-status-amber' : 'text-text-muted'}`}>
+              <span className="flex-shrink-0">{w.type === 'error' ? '✗' : w.type === 'warning' ? '⚠' : 'ℹ'}</span>
+              <span>{w.message}</span>
+            </div>
+          ))}
+          {formulaWarnings.length > 5 && <div className="text-[10px] text-text-ghost mt-0.5">+{formulaWarnings.length - 5} more warnings</div>}
+        </div>
+      )}
+      
       {/* Main Grid */}
       <div className="grid grid-cols-[1fr_330px] gap-3 flex-1 min-h-0">
         {/* Ingredients */}
