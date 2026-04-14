@@ -40,9 +40,20 @@ function calculateMP(ings: any[], totalME: number, dmi: number) {
 }
 
 function calculateMPDemand(species: string, prod: Record<string,string>): number {
-  const bw=parseFloat(prod.body_weight)||500; const maint=2.19*Math.pow(bw,0.75)/10
-  if(species==='cattle'){ const my=parseFloat(prod.milk_yield)||0; const mp2=parseFloat(prod.milk_protein)||3.3; const milkMP=my*(mp2/100)*1000/0.68/10; const lwg=parseFloat(prod.lwg)||0; return maint+milkMP+(lwg>0?lwg*150/0.59/10:0) }
-  if(species==='beef'){ const adg=parseFloat(prod.target_adg)||0; return maint+adg*150/0.59/10 }
+  const bw=parseFloat(prod.body_weight)||500
+  const maint=2.19*Math.pow(bw,0.75)
+  if(species==='cattle'){
+    const my=parseFloat(prod.milk_yield)||0
+    const mp2=parseFloat(prod.milk_protein)||3.3
+    const milkMP=my*(mp2/100)*1000/0.68
+    const lwg=parseFloat(prod.lwg)||0
+    const growth=lwg>0?lwg*150/0.59:0
+    const daysPreg=parseFloat(prod.days_pregnant)||0
+    const pregMP=daysPreg>200?daysPreg*1.5:daysPreg>0?daysPreg*0.7:0
+    return maint+milkMP+growth+pregMP
+  }
+  if(species==='beef'){ const adg=parseFloat(prod.target_adg)||0; return maint+adg*150/0.59 }
+  if(species==='sheep'){ const adg=parseFloat(prod.target_adg)||0; return maint+adg*120/0.59 }
   return maint
 }
 
