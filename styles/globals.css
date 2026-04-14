@@ -11,11 +11,19 @@
 
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #2A3A4A; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #3A4A5A; }
+  ::-webkit-scrollbar-thumb { background: #3B342E; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4A423A; }
 
-  input[type="number"]::-webkit-inner-spin-button { opacity: 1; }
-  
+  /* Hide ugly native number spinners */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
   input[type="range"] {
     -webkit-appearance: none;
     @apply h-1 rounded-sm bg-border cursor-pointer;
@@ -23,6 +31,10 @@
   input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     @apply w-3.5 h-3.5 rounded-full bg-brand cursor-pointer border-2 border-surface-bg;
+  }
+
+  select {
+    @apply bg-surface-card text-text-dim;
   }
 }
 
@@ -38,17 +50,18 @@
   .btn {
     @apply inline-flex items-center gap-1.5 px-4 py-2 rounded font-semibold text-base cursor-pointer transition-all duration-150;
   }
-  .btn-primary { @apply bg-brand text-white hover:bg-brand-dark border-none; }
-  .btn-ghost { @apply border border-border bg-surface-card text-text-muted hover:bg-surface-bg; }
+  .btn-primary { @apply bg-brand text-white hover:bg-brand-hover border-none; }
+  .btn-ghost { @apply border border-border bg-surface-card text-text-muted hover:bg-surface-hover; }
   .btn-ai { @apply border border-brand/25 bg-brand/5 text-brand hover:bg-brand/15; }
   .btn-sm { @apply px-3 py-1.5 text-sm; }
+  .btn-success { @apply bg-forest text-white hover:bg-forest-mid border-none; }
 
   .stat-card {
     @apply bg-surface-card rounded-lg p-4 border border-border;
   }
 
   .input {
-    @apply w-full px-3 py-2.5 rounded border border-border bg-surface-card text-text-dim text-base font-sans outline-none focus:border-border-focus;
+    @apply w-full px-3 py-2.5 rounded border border-border bg-surface-deep text-text-dim text-base font-sans outline-none focus:border-brand/40;
   }
 
   .filter-pill {
@@ -56,6 +69,9 @@
   }
   .filter-pill.active {
     @apply border-brand/25 bg-brand/10 text-brand;
+  }
+  .filter-pill:hover:not(.active) {
+    @apply border-border-light text-text-muted;
   }
 
   .section-label {
