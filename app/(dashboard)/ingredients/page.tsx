@@ -441,6 +441,8 @@ export default function IngredientsPage() {
           </div>
         </div>
       )}
+
+      <p className="text-[10px] text-text-ghost/50 mt-4 px-1">Nutritional data compiled from published scientific sources including CSIRO Nutrient Requirements of Domesticated Ruminants (2007), NRC Nutrient Requirements of Dairy Cattle (2001), and FAO/INRA Feedipedia. Values are reference estimates and should be verified with laboratory analysis for specific batches.</p>
     </div>
   )
 }
