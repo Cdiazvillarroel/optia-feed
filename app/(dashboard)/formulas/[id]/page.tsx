@@ -18,46 +18,113 @@ const PRODUCTION_FIELDS: Record<string, { key: string; label: string; unit: stri
 }
 
 // ── NUTRITION MODELS ─────────────────────────────────────
-function predictDMI_NRC(bw: number, my: number, mf: number, dim: number): number { const fcm=my*(0.4+15*(mf/100)); const wol=dim/7; return(0.372*fcm+0.0968*Math.pow(bw,0.75))*(1-Math.exp(-0.192*(wol+3.67))) }
-function predictDMI_CSIRO(bw: number, me: number): number { const ri=0.025+(me-7)*0.002; return bw*Math.min(Math.max(ri,0.015),0.035) }
-function effectiveDeg(aN: number, bN: number, cN: number, kp: number): number { return cN+kp===0?aN:aN+(bN*cN)/(cN+kp) }
+function predictDMI_NRC(bw: number, my: number, mf: number, dim: number): number {
+  const fcm = my * (0.4 + 15 * (mf / 100))
+  const wol = dim / 7
+  return (0.372 * fcm + 0.0968 * Math.pow(bw, 0.75)) * (1 - Math.exp(-0.192 * (wol + 3.67)))
+}
+function predictDMI_CSIRO(bw: number, me: number): number {
+  const ri = 0.025 + (me - 7) * 0.002
+  return bw * Math.min(Math.max(ri, 0.015), 0.035)
+}
+function predictDMI(species: string, prod: Record<string,string>, me: number): number {
+  const bw = parseFloat(prod.body_weight) || 0
+  const my = parseFloat(prod.milk_yield) || 0
+  if (species === 'cattle') {
+    if (my > 0 && bw > 0) {
+      return predictDMI_NRC(bw, my, parseFloat(prod.milk_fat) || 4.0, parseFloat(prod.days_in_milk) || 120)
+    }
+    // Dry cow / heifer / calf — no milk
+    return (bw || 550) * 0.02 // 2% of BW
+  }
+  if (species === 'beef') {
+    if (bw > 0 && me > 0) return predictDMI_CSIRO(bw, me)
+    return (bw || 450) * 0.025 // 2.5% of BW
+  }
+  if (species === 'sheep') {
+    return (bw || 65) * 0.028 // 2.8% of BW
+  }
+  if (species === 'pig') {
+    // Pigs: ~3-4% of BW for growers, more for lactating sows
+    return (bw || 80) * 0.032
+  }
+  if (species === 'poultry') {
+    // Poultry intake in g/d converted to kg/d
+    const intakeG = parseFloat(prod.dmi) || 130
+    return intakeG / 1000
+  }
+  return (bw || 500) * 0.02
+}
+
+function effectiveDeg(aN: number, bN: number, cN: number, kp: number): number {
+  return cN + kp === 0 ? aN : aN + (bN * cN) / (cN + kp)
+}
 
 function calculateMP(ings: any[], totalME: number, dmi: number) {
-  let totalRDP_pct=0,totalUDP_pct=0,totalCP_pct=0
-  ings.forEach(fi => { const ing=fi.ingredient; if(!ing||!ing.cp_pct) return; const cpC=ing.cp_pct*(fi.inclusion_pct||0)/100; totalCP_pct+=cpC
-    if(ing.an_frac!=null&&ing.bn_frac!=null&&ing.cn_rate!=null){ const kp=ing.particle_class==='forage'?0.03:0.05; const deg=effectiveDeg(ing.an_frac,ing.bn_frac,ing.cn_rate,kp); totalRDP_pct+=cpC*deg; totalUDP_pct+=cpC*(1-deg) }else{ totalRDP_pct+=cpC*0.65; totalUDP_pct+=cpC*0.35 }
+  let totalRDP_pct = 0, totalUDP_pct = 0, totalCP_pct = 0
+  ings.forEach(fi => {
+    const ing = fi.ingredient; if (!ing || !ing.cp_pct) return
+    const cpC = ing.cp_pct * (fi.inclusion_pct || 0) / 100; totalCP_pct += cpC
+    if (ing.an_frac != null && ing.bn_frac != null && ing.cn_rate != null) {
+      const kp = ing.particle_class === 'forage' ? 0.03 : 0.05
+      const deg = effectiveDeg(ing.an_frac, ing.bn_frac, ing.cn_rate, kp)
+      totalRDP_pct += cpC * deg; totalUDP_pct += cpC * (1 - deg)
+    } else { totalRDP_pct += cpC * 0.65; totalUDP_pct += cpC * 0.35 }
   })
   // Convert to g/d using DMI
-  const totalRDP=totalRDP_pct/100*dmi*1000
-  const totalUDP=totalUDP_pct/100*dmi*1000
-  const totalCP=totalCP_pct/100*dmi*1000
-  const fme=totalME*0.85*dmi // MJ/d
-  const mcpE=11*fme // g MCP/d (11g microbial protein per MJ FME)
-  const mcpN=0.8*totalRDP // g MCP/d (N-limited)
-  const mcp=Math.min(mcpE,mcpN)
-  const mpMic=mcp*0.75*0.85; const mpByp=totalUDP*0.90
-  return{totalCP,totalRDP,totalUDP,fme,mcp,mpFromMicrobes:mpMic,mpFromBypass:mpByp,mpSupply:mpMic+mpByp}
+  const totalRDP = totalRDP_pct / 100 * dmi * 1000
+  const totalUDP = totalUDP_pct / 100 * dmi * 1000
+  const totalCP = totalCP_pct / 100 * dmi * 1000
+  const fme = totalME * 0.85 * dmi // MJ/d
+  const mcpE = 11 * fme // g MCP/d (11g microbial protein per MJ FME)
+  const mcpN = 0.8 * totalRDP // g MCP/d (N-limited)
+  const mcp = Math.min(mcpE, mcpN)
+  const mpMic = mcp * 0.75 * 0.85
+  const mpByp = totalUDP * 0.90
+  return { totalCP, totalRDP, totalUDP, fme, mcp, mpFromMicrobes: mpMic, mpFromBypass: mpByp, mpSupply: mpMic + mpByp }
 }
 
 function calculateMPDemand(species: string, prod: Record<string,string>): number {
-  const bw=parseFloat(prod.body_weight)||500
-  const maint=2.19*Math.pow(bw,0.75)
-  if(species==='cattle'){
-    const my=parseFloat(prod.milk_yield)||0
-    const mp2=parseFloat(prod.milk_protein)||3.3
-    const milkMP=my*(mp2/100)*1000/0.68
-    const lwg=parseFloat(prod.lwg)||0
-    const growth=lwg>0?lwg*150/0.59:0
-    const daysPreg=parseFloat(prod.days_pregnant)||0
-    const pregMP=daysPreg>200?daysPreg*1.5:daysPreg>0?daysPreg*0.7:0
-    return maint+milkMP+growth+pregMP
+  const bw = parseFloat(prod.body_weight) || (species === 'cattle' ? 550 : species === 'beef' ? 450 : species === 'sheep' ? 65 : 80)
+  // Maintenance: Endogenous urinary N + metabolic faecal N + dermal losses
+  // AFRC 1993: 2.19 × BW^0.75 g/d
+  const maint = 2.19 * Math.pow(bw, 0.75)
+
+  if (species === 'cattle') {
+    const my = parseFloat(prod.milk_yield) || 0
+    const mp2 = parseFloat(prod.milk_protein) || 3.3
+    // Milk protein: yield × protein% × 1000 / efficiency (0.68)
+    const milkMP = my > 0 ? my * (mp2 / 100) * 1000 / 0.68 : 0
+    // Growth/body weight change
+    const lwg = parseFloat(prod.lwg) || 0
+    const growth = lwg > 0 ? lwg * 150 / 0.59 : 0
+    // Pregnancy (increases exponentially in last trimester)
+    const daysPreg = parseFloat(prod.days_pregnant) || 0
+    const pregMP = daysPreg > 200 ? daysPreg * 1.5 : daysPreg > 0 ? daysPreg * 0.7 : 0
+    return maint + milkMP + growth + pregMP
   }
-  if(species==='beef'){ const adg=parseFloat(prod.target_adg)||0; return maint+adg*150/0.59 }
-  if(species==='sheep'){ const adg=parseFloat(prod.target_adg)||0; return maint+adg*120/0.59 }
+  if (species === 'beef') {
+    const adg = parseFloat(prod.target_adg) || 0
+    const growth = adg > 0 ? adg * 150 / 0.59 : 0
+    return maint + growth
+  }
+  if (species === 'sheep') {
+    const adg = parseFloat(prod.target_adg) || 0
+    const growth = adg > 0 ? adg * 120 / 0.59 : 0
+    // Wool: ~2g MP per g clean wool growth
+    const woolGrowth = parseFloat(prod.wool_growth) || 0
+    const woolMP = woolGrowth > 0 ? woolGrowth / 365 * 1000 * 2 : 0
+    return maint + growth + woolMP
+  }
   return maint
 }
 
-function estimateMethane(me: number, dmi: number) { const gei=dmi*me/0.60; const mj=0.065*gei; return{ch4_g:mj/0.0556,ch4_int:dmi>0?mj/0.0556/dmi:0} }
+function estimateMethane(me: number, dmi: number) {
+  if (dmi <= 0 || me <= 0) return { ch4_g: 0, ch4_int: 0 }
+  const gei = dmi * me / 0.60
+  const mj = 0.065 * gei
+  return { ch4_g: mj / 0.0556, ch4_int: mj / 0.0556 / dmi }
+}
 
 // ── OPTIMIZER (Coordinate Descent + Fine-tuning) ─────────
 interface OptConstraint { key: string; label: string; enabled: boolean; min: number; max: number }
@@ -285,12 +352,11 @@ export default function FormulaBuilderPage() {
   const neg = me > 0 ? (1.42 * meMcal - 0.174 * meMcal * meMcal + 0.0122 * meMcal * meMcal * meMcal - 1.65) * 4.184 : 0
 
   // DMI prediction (must be before MP calculation)
-  const actualDMI=parseFloat(production.dmi)||0
-  let predictedDMI=0
-  if(formula?.species==='cattle'){predictedDMI=predictDMI_NRC(parseFloat(production.body_weight)||650,parseFloat(production.milk_yield)||28,parseFloat(production.milk_fat)||4.0,parseFloat(production.days_in_milk)||120)}
-  else if(formula?.species==='beef'){predictedDMI=predictDMI_CSIRO(parseFloat(production.body_weight)||450,me)}
-  const useDMI = actualDMI || predictedDMI || 20
-  const dmiPct=predictedDMI>0&&actualDMI>0?(actualDMI/predictedDMI*100):0
+  // DMI prediction (species-aware, must be before MP)
+  const actualDMI = parseFloat(production.dmi) || 0
+  const predictedDMI = formula ? predictDMI(formula.species, production, me) : 10
+  const useDMI = actualDMI || predictedDMI
+  const dmiPct = predictedDMI > 0 && actualDMI > 0 ? (actualDMI / predictedDMI * 100) : 0
 
   // MP model (g/d using DMI)
   const mpData=calculateMP(ings,me,useDMI)
