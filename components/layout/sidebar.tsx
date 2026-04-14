@@ -3,8 +3,8 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Home, Users, Tag, Database, FlaskConical, Radio,
-  BarChart3, Settings, Sparkles, ChevronLeft, ClipboardList
+  Home, Users, ClipboardList, Beef, Database, Package, FlaskConical, Radio,
+  BarChart3, Settings, Sparkles, ChevronLeft
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAiStore } from '@/lib/utils/store'
@@ -13,8 +13,9 @@ const navItems = [
   { href: '/workspace', label: 'Workspace', icon: Home },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/crm', label: 'CRM', icon: ClipboardList },
-  { href: '/animals', label: 'Animals', icon: Tag },
+  { href: '/animals', label: 'Animals', icon: Beef },
   { href: '/ingredients', label: 'Ingredients', icon: Database },
+  { href: '/premixes', label: 'Premixes', icon: Package },
   { href: '/formulas', label: 'Formulas', icon: FlaskConical },
   { href: '/hub', label: 'Hub', icon: Radio },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
