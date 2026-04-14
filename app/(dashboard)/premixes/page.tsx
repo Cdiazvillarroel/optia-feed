@@ -118,8 +118,11 @@ export default function PremixesPage() {
     if (!expandedId) return
     setSaving(true)
     const supabase = await getSupabase()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSaving(false); return }
     const totals = calcPremixTotals(editIngs)
-    // Delete old and re-insert
+    const premix = premixes.find(p => p.id === expandedId)
+    // Save premix ingredients
     await supabase.from('premix_ingredients').delete().eq('premix_id', expandedId)
     if (editIngs.length > 0) {
       await supabase.from('premix_ingredients').insert(editIngs.map(ei => ({
@@ -127,12 +130,42 @@ export default function PremixesPage() {
         inclusion_pct: ei.inclusion_pct, inclusion_kg: ei.inclusion_pct / 100 * 1000,
       })))
     }
-    // Update totals
+    // Update premix totals
     await supabase.from('premixes').update({
       total_dm_pct: totals.dm, total_cp_pct: totals.cp, total_me_mj: totals.me,
       total_ndf_pct: totals.ndf, total_ca_pct: totals.ca, total_p_pct: totals.p,
       total_cost_per_tonne: totals.costAF,
     }).eq('id', expandedId)
+    // Upsert matching ingredient so premix appears in formula builder
+    const ingData = {
+      name: premix?.name || 'Premix',
+      category: premix?.category || 'premix',
+      species_suitable: premix?.species_suitable || ['cattle','beef','sheep','pig','poultry'],
+      nutritionist_id: user.id,
+      premix_id: expandedId,
+      source: 'premix',
+      dm_pct: totals.dm > 0 ? totals.dm : 95,
+      cp_pct: totals.cp,
+      me_mj: totals.me,
+      ndf_pct: totals.ndf,
+      adf_pct: 0,
+      ee_pct: totals.ee,
+      starch_pct: totals.starch,
+      ca_pct: totals.ca,
+      p_pct: totals.p,
+      mg_pct: totals.mg,
+      k_pct: totals.k,
+      na_pct: totals.na,
+      s_pct: totals.s,
+      cl_pct: totals.cl,
+      particle_class: 'concentrate',
+    }
+    const { data: existing } = await supabase.from('ingredients').select('id').eq('premix_id', expandedId).limit(1).single()
+    if (existing) {
+      await supabase.from('ingredients').update(ingData).eq('id', existing.id)
+    } else {
+      await supabase.from('ingredients').insert(ingData)
+    }
     // Update local state
     setPremixes(premixes.map(p => p.id === expandedId ? { ...p, total_cp_pct: totals.cp, total_me_mj: totals.me, total_ca_pct: totals.ca, total_p_pct: totals.p, total_cost_per_tonne: totals.costAF, total_ndf_pct: totals.ndf, total_dm_pct: totals.dm } : p))
     setSaving(false); setSaved(true)
@@ -142,6 +175,7 @@ export default function PremixesPage() {
     if (!confirm('Delete this premix?')) return
     const supabase = await getSupabase()
     await supabase.from('premixes').update({ active: false }).eq('id', id)
+    await supabase.from('ingredients').delete().eq('premix_id', id)
     setPremixes(premixes.filter(p => p.id !== id))
     if (expandedId === id) { setExpandedId(null); setEditIngs([]) }
   }
