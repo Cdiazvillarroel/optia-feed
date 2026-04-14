@@ -246,10 +246,13 @@ export default function FormulaBuilderPage() {
     const { data: f } = await supabase.from('formulas').select('*, client:nutrition_clients(id, name, location, species)').eq('id', params.id).single()
     if (!f) { router.push('/formulas'); return }
     setFormula(f); if (f.ai_review) setAiReview(f.ai_review)
-    // Load persisted production params so MP demand calculates correctly on load
-    if (f.production_params && typeof f.production_params === 'object') {
-      setProduction(prev => ({ ...f.production_params, ...prev }))
-    }
+    // Initialize production with placeholder defaults so MP demand calculates on load
+    // Layer order: defaults (placeholders) → saved DB params → animal group overrides
+    const prodFields2 = PRODUCTION_FIELDS[f.species] || PRODUCTION_FIELDS.beef
+    const prodDefaults: Record<string,string> = {}
+    prodFields2.forEach(field => { prodDefaults[field.key] = field.placeholder })
+    const savedProd = (f.production_params && typeof f.production_params === 'object') ? f.production_params : {}
+    setProduction(prev => ({ ...prodDefaults, ...savedProd, ...prev }))
     if (f.animal_group_id) {
       const { data: ag } = await supabase.from('client_animals').select('*').eq('id', f.animal_group_id).single()
       if (ag) { const prefill: Record<string,string> = {}; if (ag.avg_weight_kg) prefill.body_weight = String(ag.avg_weight_kg); if (ag.milk_yield) prefill.milk_yield = String(ag.milk_yield); if (ag.milk_fat) prefill.milk_fat = String(ag.milk_fat); if (ag.milk_protein) prefill.milk_protein = String(ag.milk_protein); if (ag.days_in_milk) prefill.days_in_milk = String(ag.days_in_milk); if (ag.days_pregnant) prefill.days_pregnant = String(ag.days_pregnant); if (ag.target_adg) prefill.target_adg = String(ag.target_adg); if (ag.target_fcr) prefill.target_fcr = String(ag.target_fcr); if (ag.body_condition) prefill.body_condition = String(ag.body_condition); if (ag.frame_score) prefill.frame_score = String(ag.frame_score); if (ag.days_on_feed) prefill.days_on_feed = String(ag.days_on_feed); if (ag.sale_weight) prefill.sale_weight = String(ag.sale_weight); if (ag.price_per_kg) prefill.price_per_kg = String(ag.price_per_kg); setProduction(prev => ({ ...prefill, ...prev })) }
