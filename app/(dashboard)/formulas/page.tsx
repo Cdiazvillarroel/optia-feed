@@ -14,6 +14,14 @@ const SPECIES_OPTIONS = [
 
 const SPECIES_LABELS: Record<string,string> = { cattle: 'Dairy Cattle', beef: 'Beef Cattle', sheep: 'Sheep', pig: 'Pigs', poultry: 'Poultry' }
 
+const BREEDS: Record<string, string[]> = {
+  cattle: ['Holstein', 'Jersey'],
+  beef: ['Angus', 'Wagyu'],
+  sheep: ['Merino', 'Dorper'],
+  pig: ['Large White', 'Duroc'],
+  poultry: ['Ross 308', 'Hy-Line'],
+}
+
 const STAGES: Record<string, { value: string; label: string; group: string }[]> = {
   cattle: [
     { value: 'early_lactation', label: 'Early Lactation (0-100 DIM)', group: 'Lactation' },
@@ -84,18 +92,23 @@ export default function FormulasPage() {
   const [loading, setLoading] = useState(false)
   const [newSpecies, setNewSpecies] = useState('cattle')
   const [newStage, setNewStage] = useState('')
+  const [newBreed, setNewBreed] = useState('')
   const [newClientId, setNewClientId] = useState('')
   const [newAnimalGroupId, setNewAnimalGroupId] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newBatch, setNewBatch] = useState('1000')
 
   useEffect(() => { loadData() }, [])
-  useEffect(() => { setNewStage(''); setNewAnimalGroupId('') }, [newSpecies])
+  useEffect(() => { setNewStage(''); setNewBreed(''); setNewAnimalGroupId('') }, [newSpecies])
   useEffect(() => { if (newClientId) loadAnimalGroups(newClientId); else setAnimalGroups([]) }, [newClientId])
 
   async function getSupabase() { const { createClient } = await import('@/lib/supabase/client'); return createClient() }
 
   async function loadData() {
     const supabase = await getSupabase()
-    const { data: f } = await supabase.from('formulas').select('*, client:nutrition_clients(id, name)').not('status','eq','archived').order('updated_at', { ascending: false })
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data: f } = await supabase.from('formulas').select('*, client:nutrition_clients(id, name)').eq('nutritionist_id', user.id).not('status','eq','archived').order('updated_at', { ascending: false })
     setFormulas(f || [])
     const { data: c } = await supabase.from('nutrition_clients').select('id, name, species').eq('active', true).order('name')
     setClients(c || [])
@@ -113,16 +126,23 @@ export default function FormulasPage() {
     return matchSearch && matchStatus
   })
 
-  async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setLoading(true)
-    const form = new FormData(e.currentTarget)
+  async function handleCreate() {
+    if (!newName.trim() || !newStage) return
+    setLoading(true)
     const supabase = await getSupabase()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setLoading(false); return }
     const { data, error } = await supabase.from('formulas').insert({
-      nutritionist_id: user.id, name: form.get('name') as string,
-      client_id: newClientId || null, species: newSpecies, production_stage: newStage,
-      status: 'draft', batch_size_kg: parseInt(form.get('batch_size_kg') as string) || 1000,
+      nutritionist_id: user.id,
+      name: newName.trim(),
+      client_id: newClientId || null,
+      species: newSpecies,
+      production_stage: newStage,
+      breed: newBreed || null,
+      animal_group_id: newAnimalGroupId || null,
+      status: 'draft',
+      batch_size_kg: parseInt(newBatch) || 1000,
+      version: 1,
     }).select().single()
     setLoading(false)
     if (!error && data) { setShowCreate(false); router.push(`/formulas/${data.id}`) }
@@ -130,14 +150,16 @@ export default function FormulasPage() {
 
   const stageOptions = STAGES[newSpecies] || []
   const stageGroups = Array.from(new Set(stageOptions.map(s => s.group)))
+  const breedOptions = BREEDS[newSpecies] || []
   const filteredAnimalGroups = animalGroups.filter(ag => ag.species === newSpecies)
 
   return (
     <div className="p-7 max-w-[1200px]">
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-bold text-text">Formulas</h1>
-        <button onClick={() => { setNewSpecies('cattle'); setNewStage(''); setNewClientId(''); setNewAnimalGroupId(''); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
+        <button onClick={() => { setNewName(''); setNewSpecies('cattle'); setNewStage(''); setNewBreed(''); setNewClientId(''); setNewAnimalGroupId(''); setNewBatch('1000'); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
       </div>
+
       <div className="flex gap-2.5 mb-4 items-center">
         <div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-ghost" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search formulas..." className="input pl-9" /></div>
         <div className="flex gap-1">
@@ -145,6 +167,7 @@ export default function FormulasPage() {
           {['draft','review','approved','active'].map(s => (<button key={s} onClick={() => setStatusFilter(statusFilter===s?null:s)} className={`filter-pill ${statusFilter===s?'active':''}`}>{s}</button>))}
         </div>
       </div>
+
       <div className="card">
         <div className="grid grid-cols-[2fr_1fr_1.5fr_1fr_50px] px-4 py-2.5 border-b border-border gap-2">
           {['Formula','Client','Species / Stage','Status',''].map(h => (<span key={h} className="text-2xs font-bold text-text-ghost uppercase tracking-wider">{h}</span>))}
@@ -153,7 +176,10 @@ export default function FormulasPage() {
           <div key={f.id} onClick={() => router.push(`/formulas/${f.id}`)} className="grid grid-cols-[2fr_1fr_1.5fr_1fr_50px] px-4 py-3 border-b border-border/5 gap-2 items-center hover:bg-[#253442] transition-colors cursor-pointer">
             <div><span className="text-base font-semibold text-text-dim">{f.name}</span><span className="text-xs text-text-ghost font-mono ml-2">v{f.version}</span></div>
             <span className="text-sm text-text-muted">{f.client?.name || '\u2014'}</span>
-            <div><div className="text-sm text-text-muted">{SPECIES_LABELS[f.species] || f.species}</div><div className="text-2xs text-text-ghost">{getStageLabel(f.species, f.production_stage)}</div></div>
+            <div>
+              <div className="text-sm text-text-muted">{SPECIES_LABELS[f.species] || f.species}{f.breed ? ' \u00B7 ' + f.breed : ''}</div>
+              <div className="text-2xs text-text-ghost">{getStageLabel(f.species, f.production_stage)}</div>
+            </div>
             <span className={`text-2xs px-2 py-0.5 rounded font-bold font-mono uppercase w-fit ${STATUS_COLORS[f.status]||''}`}>{f.status}</span>
             <span className="text-text-ghost text-right">&rsaquo;</span>
           </div>
@@ -163,19 +189,24 @@ export default function FormulasPage() {
         )}
       </div>
 
-      {/* CREATE MODAL */}
+      {/* ── CREATE MODAL ──────────────────────────────── */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
           <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5"><h2 className="text-xl font-bold text-text">New Formula</h2><button onClick={() => setShowCreate(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button></div>
-            <form onSubmit={handleCreate} className="flex flex-col gap-3.5">
-              <div><label className="text-xs font-semibold text-text-muted block mb-1">Formula Name *</label><input name="name" required className="input" placeholder="e.g. Early Lact — High Production 28L" /></div>
+            <div className="flex flex-col gap-3.5">
+              {/* Name */}
+              <div><label className="text-xs font-semibold text-text-muted block mb-1">Formula Name *</label><input value={newName} onChange={e => setNewName(e.target.value)} className="input" placeholder="e.g. Early Lact — High Production 28L" /></div>
+
+              {/* Client */}
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Client</label>
                 <select value={newClientId} onChange={e => setNewClientId(e.target.value)} className="input">
                   <option value="">No client (template)</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
+
+              {/* Species + Stage */}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs font-semibold text-text-muted block mb-1">Species *</label>
                   <select value={newSpecies} onChange={e => setNewSpecies(e.target.value)} className="input">
@@ -183,13 +214,23 @@ export default function FormulasPage() {
                   </select>
                 </div>
                 <div><label className="text-xs font-semibold text-text-muted block mb-1">Production Stage *</label>
-                  <select value={newStage} onChange={e => setNewStage(e.target.value)} required className="input">
+                  <select value={newStage} onChange={e => setNewStage(e.target.value)} className="input">
                     <option value="">Select stage...</option>
                     {stageGroups.map(g => (<optgroup key={g} label={g}>{stageOptions.filter(s => s.group === g).map(s => (<option key={s.value} value={s.value}>{s.label}</option>))}</optgroup>))}
                   </select>
                 </div>
               </div>
 
+              {/* Breed */}
+              <div><label className="text-xs font-semibold text-text-muted block mb-1">Breed *</label>
+                <select value={newBreed} onChange={e => setNewBreed(e.target.value)} className="input">
+                  <option value="">Select breed...</option>
+                  {breedOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <p className="text-2xs text-text-ghost mt-1">Breed determines specific nutritional requirements (BW, production capacity, feed efficiency).</p>
+              </div>
+
+              {/* Animal Group */}
               {newClientId && filteredAnimalGroups.length > 0 && (
                 <div>
                   <label className="text-xs font-semibold text-text-muted block mb-1">Link to Animal Group <span className="text-text-ghost font-normal">(optional)</span></label>
@@ -197,16 +238,19 @@ export default function FormulasPage() {
                     <option value="">No specific group</option>
                     {filteredAnimalGroups.map(ag => (<option key={ag.id} value={ag.id}>{ag.name} — {ag.breed || ag.species} ({ag.count} head{ag.avg_weight_kg ? ', ' + ag.avg_weight_kg + 'kg' : ''})</option>))}
                   </select>
-                  <p className="text-2xs text-text-ghost mt-1">Links production data from the animal group.</p>
+                  <p className="text-2xs text-text-ghost mt-1">Pre-fills production data from the animal group.</p>
                 </div>
               )}
 
-              <div><label className="text-xs font-semibold text-text-muted block mb-1">Batch Size (kg)</label><input name="batch_size_kg" type="number" defaultValue="1000" className="input" /></div>
+              {/* Batch Size */}
+              <div><label className="text-xs font-semibold text-text-muted block mb-1">Batch Size (kg)</label><input type="number" value={newBatch} onChange={e => setNewBatch(e.target.value)} className="input" min="100" step="100" /></div>
+
+              {/* Actions */}
               <div className="flex gap-2 mt-2">
-                <button type="button" onClick={() => setShowCreate(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
-                <button type="submit" disabled={loading || !newStage} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{loading?'Creating...':'Create Formula'}</button>
+                <button onClick={() => setShowCreate(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
+                <button onClick={handleCreate} disabled={loading || !newName.trim() || !newStage} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{loading?'Creating...':'Create Formula'}</button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
