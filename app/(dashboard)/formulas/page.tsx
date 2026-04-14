@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Search, FlaskConical, X } from 'lucide-react'
+import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy } from 'lucide-react'
 
 const SPECIES_OPTIONS = [
   { value: 'cattle', label: 'Dairy Cattle' },
@@ -133,19 +133,35 @@ export default function FormulasPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setLoading(false); return }
     const { data, error } = await supabase.from('formulas').insert({
-      nutritionist_id: user.id,
-      name: newName.trim(),
-      client_id: newClientId || null,
-      species: newSpecies,
-      production_stage: newStage,
-      breed: newBreed || null,
-      animal_group_id: newAnimalGroupId || null,
-      status: 'draft',
-      batch_size_kg: parseInt(newBatch) || 1000,
-      version: 1,
+      nutritionist_id: user.id, name: newName.trim(), client_id: newClientId || null,
+      species: newSpecies, production_stage: newStage, breed: newBreed || null,
+      animal_group_id: newAnimalGroupId || null, status: 'draft',
+      batch_size_kg: parseInt(newBatch) || 1000, version: 1,
     }).select().single()
     setLoading(false)
     if (!error && data) { setShowCreate(false); router.push(`/formulas/${data.id}`) }
+  }
+
+  async function deleteFormula(id: string) {
+    if (!confirm('Delete this formula? This cannot be undone.')) return
+    const supabase = await getSupabase()
+    await supabase.from('formula_ingredients').delete().eq('formula_id', id)
+    await supabase.from('formulas').delete().eq('id', id)
+    setFormulas(formulas.filter(f => f.id !== id))
+  }
+
+  async function duplicateFormula(id: string) {
+    const supabase = await getSupabase()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const orig = formulas.find(f => f.id === id)
+    if (!orig) return
+    const { data } = await supabase.from('formulas').insert({
+      nutritionist_id: user.id, name: orig.name + ' (copy)', client_id: orig.client_id,
+      species: orig.species, production_stage: orig.production_stage, breed: orig.breed,
+      batch_size_kg: orig.batch_size_kg, status: 'draft', version: 1,
+    }).select('*, client:nutrition_clients(id, name)').single()
+    if (data) { setFormulas([data, ...formulas]) }
   }
 
   const stageOptions = STAGES[newSpecies] || []
@@ -169,19 +185,26 @@ export default function FormulasPage() {
       </div>
 
       <div className="card">
-        <div className="grid grid-cols-[2fr_1fr_1.5fr_1fr_50px] px-4 py-2.5 border-b border-border gap-2">
+        <div className="grid grid-cols-[2fr_1fr_1.5fr_1fr_90px] px-4 py-2.5 border-b border-border gap-2">
           {['Formula','Client','Species / Stage','Status',''].map(h => (<span key={h} className="text-2xs font-bold text-text-ghost uppercase tracking-wider">{h}</span>))}
         </div>
         {filtered.map((f) => (
-          <div key={f.id} onClick={() => router.push(`/formulas/${f.id}`)} className="grid grid-cols-[2fr_1fr_1.5fr_1fr_50px] px-4 py-3 border-b border-border/5 gap-2 items-center hover:bg-[#253442] transition-colors cursor-pointer">
-            <div><span className="text-base font-semibold text-text-dim">{f.name}</span><span className="text-xs text-text-ghost font-mono ml-2">v{f.version}</span></div>
+          <div key={f.id} className="grid grid-cols-[2fr_1fr_1.5fr_1fr_90px] px-4 py-3 border-b border-border/5 gap-2 items-center hover:bg-[#253442] transition-colors">
+            <div onClick={() => router.push(`/formulas/${f.id}`)} className="cursor-pointer">
+              <span className="text-base font-semibold text-text-dim">{f.name}</span>
+              <span className="text-xs text-text-ghost font-mono ml-2">v{f.version}</span>
+            </div>
             <span className="text-sm text-text-muted">{f.client?.name || '\u2014'}</span>
             <div>
               <div className="text-sm text-text-muted">{SPECIES_LABELS[f.species] || f.species}{f.breed ? ' \u00B7 ' + f.breed : ''}</div>
               <div className="text-2xs text-text-ghost">{getStageLabel(f.species, f.production_stage)}</div>
             </div>
             <span className={`text-2xs px-2 py-0.5 rounded font-bold font-mono uppercase w-fit ${STATUS_COLORS[f.status]||''}`}>{f.status}</span>
-            <span className="text-text-ghost text-right">&rsaquo;</span>
+            <div className="flex items-center gap-0.5 justify-end">
+              <button onClick={() => duplicateFormula(f.id)} title="Duplicate" className="p-1.5 rounded text-text-ghost/40 hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer"><Copy size={13}/></button>
+              <button onClick={() => router.push(`/formulas/${f.id}`)} title="Edit" className="p-1.5 rounded text-text-ghost/40 hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer"><Pencil size={13}/></button>
+              <button onClick={() => deleteFormula(f.id)} title="Delete" className="p-1.5 rounded text-text-ghost/40 hover:text-status-red hover:bg-status-red/10 bg-transparent border-none cursor-pointer"><Trash2 size={13}/></button>
+            </div>
           </div>
         ))}
         {filtered.length === 0 && (
@@ -195,18 +218,13 @@ export default function FormulasPage() {
           <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5"><h2 className="text-xl font-bold text-text">New Formula</h2><button onClick={() => setShowCreate(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button></div>
             <div className="flex flex-col gap-3.5">
-              {/* Name */}
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Formula Name *</label><input value={newName} onChange={e => setNewName(e.target.value)} className="input" placeholder="e.g. Early Lact — High Production 28L" /></div>
-
-              {/* Client */}
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Client</label>
                 <select value={newClientId} onChange={e => setNewClientId(e.target.value)} className="input">
                   <option value="">No client (template)</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-
-              {/* Species + Stage */}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs font-semibold text-text-muted block mb-1">Species *</label>
                   <select value={newSpecies} onChange={e => setNewSpecies(e.target.value)} className="input">
@@ -220,17 +238,13 @@ export default function FormulasPage() {
                   </select>
                 </div>
               </div>
-
-              {/* Breed */}
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Breed *</label>
                 <select value={newBreed} onChange={e => setNewBreed(e.target.value)} className="input">
                   <option value="">Select breed...</option>
                   {breedOptions.map(b => <option key={b} value={b}>{b}</option>)}
                 </select>
-                <p className="text-2xs text-text-ghost mt-1">Breed determines specific nutritional requirements (BW, production capacity, feed efficiency).</p>
+                <p className="text-2xs text-text-ghost mt-1">Breed determines specific nutritional requirements.</p>
               </div>
-
-              {/* Animal Group */}
               {newClientId && filteredAnimalGroups.length > 0 && (
                 <div>
                   <label className="text-xs font-semibold text-text-muted block mb-1">Link to Animal Group <span className="text-text-ghost font-normal">(optional)</span></label>
@@ -241,11 +255,7 @@ export default function FormulasPage() {
                   <p className="text-2xs text-text-ghost mt-1">Pre-fills production data from the animal group.</p>
                 </div>
               )}
-
-              {/* Batch Size */}
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Batch Size (kg)</label><input type="number" value={newBatch} onChange={e => setNewBatch(e.target.value)} className="input" min="100" step="100" /></div>
-
-              {/* Actions */}
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setShowCreate(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
                 <button onClick={handleCreate} disabled={loading || !newName.trim() || !newStage} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{loading?'Creating...':'Create Formula'}</button>
