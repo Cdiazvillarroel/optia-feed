@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Users, FlaskConical, Database, Sparkles, Package, ChevronRight, Check, ArrowRight, Beaker } from 'lucide-react'
+import { Users, FlaskConical, Database, Sparkles, Package, ChevronRight, Check, ArrowRight, Beaker, Rocket } from 'lucide-react'
 
 const NUT_MODELS = ['AFRC', 'NRC', 'CNCPS', 'INRA']
 const CURRENCIES = ['AUD', 'USD', 'NZD', 'GBP', 'EUR', 'BRL', 'ARS', 'ZAR']
@@ -23,8 +23,8 @@ export default function WorkspacePage() {
   const [obCountry, setObCountry] = useState('Australia')
   const [obModel, setObModel] = useState('AFRC')
   const [obCurrency, setObCurrency] = useState('AUD')
-  const [obSpecies, setObSpecies] = useState<string[]>(['cattle'])
   const [saving, setSaving] = useState(false)
+  const [demoLoaded, setDemoLoaded] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -52,25 +52,35 @@ export default function WorkspacePage() {
     setLoading(false)
   }
 
-  async function completeOnboarding() {
-    setSaving(true)
+  async function saveProfile() {
     const supabase = await getSupabase()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     await supabase.from('nutritionist_profiles').update({
       full_name: obName, company: obCompany, country: obCountry,
       nutrition_model: obModel, currency: obCurrency,
-      onboarding_completed: true,
     }).eq('id', user.id)
+  }
+
+  async function finishOnboarding() {
+    setSaving(true)
+    const supabase = await getSupabase()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSaving(false); return }
+    await supabase.from('nutritionist_profiles').update({ onboarding_completed: true }).eq('id', user.id)
     setProfile({ ...profile, full_name: obName, company: obCompany, onboarding_completed: true })
-    setSaving(false); setShowOnboarding(false)
+    setSaving(false)
+    setShowOnboarding(false)
+    loadData()
   }
 
   async function loadDemoData() {
     setSaving(true)
     const supabase = await getSupabase()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) { setSaving(false); return }
+    // Save profile first
+    await saveProfile()
     // Create demo client
     const { data: client } = await supabase.from('nutrition_clients').insert({
       nutritionist_id: user.id, name: 'Demo Farm — Valley Dairy',
@@ -79,22 +89,19 @@ export default function WorkspacePage() {
       contact_email: 'john@valleydairy.com.au', active: true,
     }).select().single()
     if (client) {
-      // Create animal groups
       await supabase.from('client_animals').insert([
         { client_id: client.id, name: 'Milking herd', species: 'cattle', breed: 'Holstein', count: 220, avg_weight_kg: 650 },
         { client_id: client.id, name: 'Dry cows', species: 'cattle', breed: 'Holstein', count: 40, avg_weight_kg: 680 },
         { client_id: client.id, name: 'Heifers', species: 'cattle', breed: 'Holstein', count: 80, avg_weight_kg: 480 },
       ])
-      // Create demo formula
       const { data: formula } = await supabase.from('formulas').insert({
         nutritionist_id: user.id, name: 'Demo — Lactation PMR', client_id: client.id,
         species: 'cattle', production_stage: 'early_lactation', breed: 'Holstein',
         batch_size_kg: 1000, status: 'draft', version: 1,
       }).select().single()
       if (formula) {
-        // Get some common ingredients
         const { data: ings } = await supabase.from('ingredients').select('id, name').in('name', [
-          'Ryegrass/clover silage - Good - Pit', 'Maize Silage', 'Wheat grain',
+          'Ryegrass/clover silage - Good - Pit', 'Maize silage', 'Wheat grain',
           'Canola meal', 'Barley grain', 'Limestone (CaC03)'
         ]).limit(6)
         if (ings && ings.length > 0) {
@@ -106,8 +113,17 @@ export default function WorkspacePage() {
         }
       }
     }
-    await completeOnboarding()
-    loadData()
+    setSaving(false)
+    setDemoLoaded(true)
+    setOnboardStep(4)
+  }
+
+  async function startFresh() {
+    setSaving(true)
+    await saveProfile()
+    setSaving(false)
+    setDemoLoaded(false)
+    setOnboardStep(4)
   }
 
   const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'
@@ -122,7 +138,6 @@ export default function WorkspacePage() {
         <p className="text-base text-text-ghost mt-1">Here&apos;s what&apos;s happening across your clients today.</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-4 gap-3.5 mb-6">
         {[
           { label: 'Active Clients', value: stats.clients, icon: Users, color: 'text-brand', href: '/clients' },
@@ -131,23 +146,18 @@ export default function WorkspacePage() {
           { label: 'Premixes', value: stats.premixes, icon: Package, color: 'text-status-blue', href: '/premixes' },
         ].map((stat, i) => (
           <div key={i} onClick={() => router.push(stat.href)} className="stat-card cursor-pointer hover:border-brand/20 transition-colors">
-            <div className="flex items-center gap-2 mb-2">
-              <stat.icon size={14} className="text-text-ghost" />
-              <span className="text-xs font-semibold text-text-ghost uppercase tracking-wider">{stat.label}</span>
-            </div>
+            <div className="flex items-center gap-2 mb-2"><stat.icon size={14} className="text-text-ghost" /><span className="text-xs font-semibold text-text-ghost uppercase tracking-wider">{stat.label}</span></div>
             <div className={`text-3xl font-bold font-mono ${stat.color}`}>{stat.value}</div>
           </div>
         ))}
       </div>
 
-      {/* Quick Actions */}
       <div className="flex gap-2 mb-6">
         <button onClick={() => router.push('/clients')} className="btn btn-ghost btn-sm"><Users size={14} /> New Client</button>
         <button onClick={() => router.push('/formulas')} className="btn btn-ghost btn-sm"><FlaskConical size={14} /> New Formula</button>
         <button onClick={() => router.push('/premixes')} className="btn btn-ghost btn-sm"><Package size={14} /> New Premix</button>
       </div>
 
-      {/* Two columns */}
       <div className="grid grid-cols-2 gap-4">
         <div className="card">
           <div className="card-header"><span className="text-base font-bold text-text-dim">Clients</span><span onClick={() => router.push('/clients')} className="text-xs text-brand font-semibold cursor-pointer hover:underline">View all &rarr;</span></div>
@@ -174,8 +184,7 @@ export default function WorkspacePage() {
       {showOnboarding && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-surface-card rounded-2xl border border-border w-full max-w-xl shadow-2xl overflow-hidden">
-            {/* Progress bar */}
-            <div className="h-1 bg-surface-deep"><div className="h-full bg-brand transition-all duration-500" style={{ width: `${((onboardStep + 1) / 4) * 100}%` }} /></div>
+            <div className="h-1 bg-surface-deep"><div className="h-full bg-brand transition-all duration-500" style={{ width: `${((onboardStep + 1) / 5) * 100}%` }} /></div>
 
             {/* Step 0: Welcome */}
             {onboardStep === 0 && (
@@ -190,7 +199,7 @@ export default function WorkspacePage() {
                   {[
                     ['Set up your profile', 'Name, company, preferences'],
                     ['Choose your nutrition model', 'AFRC, NRC, or CNCPS'],
-                    ['Start formulating', 'Create a client or load demo data'],
+                    ['Start formulating', 'Create a client or explore with demo data'],
                   ].map(([title, desc], i) => (
                     <div key={i} className="flex items-center gap-3 text-left p-2.5 rounded-lg bg-surface-deep">
                       <div className="w-6 h-6 rounded-full bg-brand/15 text-brand flex items-center justify-center text-xs font-bold flex-shrink-0">{i + 1}</div>
@@ -234,12 +243,12 @@ export default function WorkspacePage() {
             {onboardStep === 2 && (
               <div className="p-8">
                 <h2 className="text-xl font-bold text-text mb-1">Nutrition model</h2>
-                <p className="text-sm text-text-ghost mb-5">Which system do you primarily work with? You can switch anytime.</p>
+                <p className="text-sm text-text-ghost mb-5">Which system do you primarily work with? You can switch anytime in the formula builder.</p>
                 <div className="flex flex-col gap-2">
                   {[
                     { key: 'AFRC', name: 'AFRC / CSIRO', region: 'Australia, New Zealand, UK', desc: 'ME-based energy, UDP/RDP protein system. Standard in AU/NZ dairy and beef.' },
                     { key: 'NRC', name: 'NRC 2001', region: 'United States, Canada', desc: 'NEL/TDN energy, RUP/RDP protein. The US dairy industry standard.' },
-                    { key: 'CNCPS', name: 'CNCPS v6 (Cornell)', region: 'Research, Global', desc: 'Advanced protein & carbohydrate fractions. Used by AMTS and NDS software.' },
+                    { key: 'CNCPS', name: 'CNCPS v6 (Cornell)', region: 'Research, Global', desc: 'Advanced protein and carbohydrate fractions. Used by AMTS and NDS software.' },
                   ].map(m => (
                     <div key={m.key} onClick={() => setObModel(m.key)} className={`p-3.5 rounded-lg border cursor-pointer transition-all ${obModel === m.key ? 'border-brand bg-brand/5' : 'border-border hover:border-border-light bg-surface-bg'}`}>
                       <div className="flex items-center gap-2 mb-0.5">
@@ -261,32 +270,59 @@ export default function WorkspacePage() {
             {/* Step 3: Quick Start */}
             {onboardStep === 3 && (
               <div className="p-8">
-                <h2 className="text-xl font-bold text-text mb-1">Ready to go!</h2>
-                <p className="text-sm text-text-ghost mb-5">How would you like to start?</p>
+                <h2 className="text-xl font-bold text-text mb-1">How would you like to start?</h2>
+                <p className="text-sm text-text-ghost mb-5">You can always create more clients and formulas later.</p>
                 <div className="flex flex-col gap-3">
-                  <div onClick={loadDemoData} className="p-4 rounded-lg border border-brand/30 bg-brand/5 cursor-pointer hover:bg-brand/10 transition-all">
+                  <button onClick={loadDemoData} disabled={saving} className="p-4 rounded-lg border border-brand/30 bg-brand/5 cursor-pointer hover:bg-brand/10 transition-all text-left w-full">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-brand/15 flex items-center justify-center"><Beaker size={20} className="text-brand" /></div>
+                      <div className="w-10 h-10 rounded-lg bg-brand/15 flex items-center justify-center flex-shrink-0"><Beaker size={20} className="text-brand" /></div>
                       <div className="flex-1">
-                        <div className="text-sm font-bold text-text">Load demo data</div>
+                        <div className="text-sm font-bold text-text">{saving ? 'Creating demo data...' : 'Explore with demo data'}</div>
                         <div className="text-2xs text-text-ghost">Creates a sample dairy farm with animal groups and a starter lactation formula. Perfect for exploring the platform.</div>
                       </div>
-                      <ArrowRight size={16} className="text-brand" />
+                      <ArrowRight size={16} className="text-brand flex-shrink-0" />
                     </div>
-                  </div>
-                  <div onClick={completeOnboarding} className="p-4 rounded-lg border border-border cursor-pointer hover:border-brand/20 hover:bg-surface-bg transition-all">
+                  </button>
+                  <button onClick={startFresh} disabled={saving} className="p-4 rounded-lg border border-border cursor-pointer hover:border-brand/20 hover:bg-surface-bg transition-all text-left w-full">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-surface-deep flex items-center justify-center"><Users size={20} className="text-text-ghost" /></div>
+                      <div className="w-10 h-10 rounded-lg bg-surface-deep flex items-center justify-center flex-shrink-0"><Users size={20} className="text-text-ghost" /></div>
                       <div className="flex-1">
                         <div className="text-sm font-bold text-text">Start fresh</div>
-                        <div className="text-2xs text-text-ghost">Jump straight in and create your first client. You already have 286 ingredients from the Rumen8 database.</div>
+                        <div className="text-2xs text-text-ghost">Jump straight in and create your own clients and formulas. 286 ingredients with full nutritional profiles are ready to use.</div>
                       </div>
-                      <ArrowRight size={16} className="text-text-ghost" />
+                      <ArrowRight size={16} className="text-text-ghost flex-shrink-0" />
+                    </div>
+                  </button>
+                </div>
+                <button onClick={() => setOnboardStep(2)} disabled={saving} className="btn btn-ghost w-full mt-4 justify-center">Back</button>
+              </div>
+            )}
+
+            {/* Step 4: Done */}
+            {onboardStep === 4 && (
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 rounded-full bg-brand/15 flex items-center justify-center mx-auto mb-5">
+                  <Check size={32} className="text-brand" />
+                </div>
+                <h1 className="text-2xl font-bold text-text mb-2">You&apos;re all set, {obName.split(' ')[0]}!</h1>
+                {demoLoaded ? (
+                  <div className="text-sm text-text-muted mb-6">
+                    <p className="mb-2">We created a demo farm for you to explore:</p>
+                    <div className="flex flex-col gap-1.5 max-w-xs mx-auto text-left">
+                      <div className="flex items-center gap-2 p-2 rounded bg-surface-deep"><Check size={14} className="text-brand flex-shrink-0" /><span className="text-2xs text-text-dim">Demo Farm — Valley Dairy (3 animal groups)</span></div>
+                      <div className="flex items-center gap-2 p-2 rounded bg-surface-deep"><Check size={14} className="text-brand flex-shrink-0" /><span className="text-2xs text-text-dim">Demo — Lactation PMR formula with ingredients</span></div>
+                      <div className="flex items-center gap-2 p-2 rounded bg-surface-deep"><Check size={14} className="text-brand flex-shrink-0" /><span className="text-2xs text-text-dim">286 ingredients ready to use</span></div>
                     </div>
                   </div>
+                ) : (
+                  <p className="text-sm text-text-muted mb-6">Your workspace is ready. Start by adding your first client or creating a formula.</p>
+                )}
+                <div className="flex flex-col gap-2 max-w-xs mx-auto">
+                  <button onClick={finishOnboarding} className="btn btn-primary w-full justify-center"><Rocket size={14} /> Start using Optia Feed</button>
+                  {demoLoaded && (
+                    <button onClick={() => { finishOnboarding(); setTimeout(() => router.push('/formulas'), 300) }} className="btn btn-ghost w-full justify-center text-sm">Open demo formula &rarr;</button>
+                  )}
                 </div>
-                <button onClick={() => setOnboardStep(2)} className="btn btn-ghost w-full mt-4 justify-center">Back</button>
-                {saving && <div className="text-center text-sm text-text-ghost mt-3">Setting up your workspace...</div>}
               </div>
             )}
           </div>
