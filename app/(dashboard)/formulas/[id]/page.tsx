@@ -548,7 +548,7 @@ export default function FormulaBuilderPage() {
                 {/* Grid circles */}
                 {[0.25,0.5,0.75,1.0].map(s=>(<circle key={s} cx={cx} cy={cy} r={r*s} fill="none" stroke="var(--b)" strokeWidth="0.3" strokeDasharray="2 2"/>))}
                 {/* Spokes + labels */}
-                {nutrients.map((nt,i)=>{const end=toXY(i,maxVals[i],maxVals[i]);const lbl=toXY(i,maxVals[i]*1.18,maxVals[i]);return(<g key={nt.l}><line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="var(--b)" strokeWidth="0.3"/><text x={lbl.x} y={lbl.y} textAnchor="middle" dominantBaseline="central" fill="var(--s)" fontSize="9" fontWeight="500">{nt.l}</text></g>)})}
+                {nutrients.map((nt,i)=>{const end=toXY(i,maxVals[i],maxVals[i]);const lbl=toXY(i,maxVals[i]*1.18,maxVals[i]);return(<g key={nt.l}><line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="var(--b)" strokeWidth="0.3"/><text x={lbl.x} y={lbl.y} textAnchor="middle" dominantBaseline="central" fill="var(--p)" fontSize="9" fontWeight="500">{nt.l}</text></g>)})}
                 {/* Requirement range (green band) */}
                 <path d={toPath(reqMaxPts)} fill="#4CAF7D" fillOpacity="0.12" stroke="#4CAF7D" strokeWidth="0.5" strokeOpacity="0.3"/>
                 <path d={toPath(reqMinPts)} fill="var(--bg2)" fillOpacity="0.8" stroke="#4CAF7D" strokeWidth="0.5" strokeOpacity="0.3" strokeDasharray="2 2"/>
