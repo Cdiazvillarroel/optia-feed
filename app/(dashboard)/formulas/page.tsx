@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation'
 import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy, Bookmark, BookmarkCheck } from 'lucide-react'
 
 const SPECIES_OPTIONS = [
-  { value: 'cattle', label: 'Dairy Cattle' },
-  { value: 'beef', label: 'Beef Cattle' },
-  { value: 'sheep', label: 'Sheep' },
-  { value: 'pig', label: 'Pigs' },
-  { value: 'poultry', label: 'Poultry' },
+  { value: 'cattle', label: 'Dairy Cattle', short: 'Dairy' },
+  { value: 'beef', label: 'Beef Cattle', short: 'Beef' },
+  { value: 'sheep', label: 'Sheep', short: 'Sheep' },
+  { value: 'pig', label: 'Pigs', short: 'Pigs' },
+  { value: 'poultry', label: 'Poultry', short: 'Poultry' },
 ]
 
 const SPECIES_LABELS: Record<string,string> = { cattle: 'Dairy Cattle', beef: 'Beef Cattle', sheep: 'Sheep', pig: 'Pigs', poultry: 'Poultry' }
@@ -86,6 +86,12 @@ const STATUS_COLORS: Record<string,string> = {
   approved:'bg-brand/15 text-brand',active:'bg-brand/15 text-brand',archived:'bg-white/5 text-text-ghost'
 }
 
+const SPECIES_BADGE_COLORS: Record<string,string> = {
+  cattle:'bg-[#2E6B42]/15 text-[#2E6B42]', beef:'bg-[#1E4A5A]/15 text-[#1E4A5A]',
+  sheep:'bg-[#C9A043]/15 text-[#C9A043]', pig:'bg-[#BE5529]/15 text-[#BE5529]',
+  poultry:'bg-[#C9A043]/15 text-[#C9A043]'
+}
+
 function getStageLabel(species: string, stage: string): string {
   const all = STAGES[species] || []
   const found = all.find(s => s.value === stage)
@@ -99,6 +105,7 @@ export default function FormulasPage() {
   const [animalGroups, setAnimalGroups] = useState<any[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string|null>(null)
+  const [speciesFilter, setSpeciesFilter] = useState<string|null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(false)
   const [newSpecies, setNewSpecies] = useState('cattle')
@@ -132,10 +139,16 @@ export default function FormulasPage() {
     setAnimalGroups(data || [])
   }
 
+  // Species counts for filter badges
+  const speciesCounts: Record<string, number> = {}
+  formulas.forEach(f => { speciesCounts[f.species] = (speciesCounts[f.species] || 0) + 1 })
+  const activeSpecies = SPECIES_OPTIONS.filter(sp => speciesCounts[sp.value] > 0)
+
   const filtered = formulas.filter((f) => {
     const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.client?.name||'').toLowerCase().includes(search.toLowerCase())
     const matchStatus = !statusFilter ? true : statusFilter === 'template' ? f.is_template : f.status === statusFilter
-    return matchSearch && matchStatus
+    const matchSpecies = !speciesFilter || f.species === speciesFilter
+    return matchSearch && matchStatus && matchSpecies
   })
 
   async function handleCreate() {
@@ -150,7 +163,6 @@ export default function FormulasPage() {
       animal_group_id: newAnimalGroupId || null, status: 'draft',
       batch_size_kg: parseInt(newBatch) || 1000, version: 1,
     }).select().single()
-    // Copy ingredients from template
     if (!error && data && newTemplateId) {
       const { data: templateIngs } = await supabase.from('formula_ingredients').select('ingredient_id, inclusion_pct, locked').eq('formula_id', newTemplateId)
       if (templateIngs && templateIngs.length > 0) {
@@ -184,7 +196,6 @@ export default function FormulasPage() {
       batch_size_kg: orig.batch_size_kg, status: 'draft', version: 1,
     }).select('*, client:nutrition_clients(id, name)').single()
     if (data) {
-      // Copy ingredients
       const { data: origIngs } = await supabase.from('formula_ingredients').select('ingredient_id, inclusion_pct, locked').eq('formula_id', id)
       if (origIngs && origIngs.length > 0) {
         await supabase.from('formula_ingredients').insert(origIngs.map(ti => ({
@@ -209,8 +220,6 @@ export default function FormulasPage() {
   const stageGroups = Array.from(new Set(stageOptions.map(s => s.group)))
   const breedOptions = BREEDS[newSpecies] || []
   const filteredAnimalGroups = animalGroups.filter(ag => ag.species === newSpecies)
-
-  // Templates for the create modal — same species first, then others
   const sameSpeciesTemplates = formulas.filter(f => f.is_template && f.species === newSpecies)
   const otherSpeciesTemplates = formulas.filter(f => f.is_template && f.species !== newSpecies)
 
@@ -221,7 +230,8 @@ export default function FormulasPage() {
         <button onClick={() => { setNewName(''); setNewSpecies('cattle'); setNewStage(''); setNewBreed(''); setNewClientId(''); setNewAnimalGroupId(''); setNewBatch('1000'); setNewTemplateId(''); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
       </div>
 
-      <div className="flex gap-2.5 mb-4 items-center">
+      {/* Search + Status filters */}
+      <div className="flex gap-2.5 mb-2 items-center">
         <div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-ghost" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search formulas..." className="input pl-9" /></div>
         <div className="flex gap-1">
           <button onClick={() => setStatusFilter(null)} className={`filter-pill ${!statusFilter?'active':''}`}>All</button>
@@ -229,12 +239,27 @@ export default function FormulasPage() {
         </div>
       </div>
 
+      {/* Species filters */}
+      {activeSpecies.length > 1 && (
+        <div className="flex gap-1.5 mb-4">
+          <button onClick={() => setSpeciesFilter(null)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all border cursor-pointer ${!speciesFilter ? 'border-brand bg-brand/10 text-brand' : 'border-border text-text-ghost hover:border-border-light bg-transparent'}`}>
+            All species <span className="font-mono ml-1 opacity-60">{formulas.length}</span>
+          </button>
+          {activeSpecies.map(sp => (
+            <button key={sp.value} onClick={() => setSpeciesFilter(speciesFilter === sp.value ? null : sp.value)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all border cursor-pointer flex items-center gap-1.5 ${speciesFilter === sp.value ? 'border-brand bg-brand/10 text-brand' : 'border-border text-text-ghost hover:border-border-light bg-transparent'}`}>
+              <span className={`w-2 h-2 rounded-full ${sp.value === 'cattle' ? 'bg-[#2E6B42]' : sp.value === 'beef' ? 'bg-[#1E4A5A]' : sp.value === 'pig' ? 'bg-[#BE5529]' : sp.value === 'poultry' ? 'bg-[#C9A043]' : 'bg-[#C9A043]'}`} />
+              {sp.short} <span className="font-mono opacity-60">{speciesCounts[sp.value]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="card">
         <div className="grid grid-cols-[2fr_1fr_1.5fr_1fr_110px] px-4 py-2.5 border-b border-border gap-2">
           {['Formula','Client','Species / Stage','Status',''].map(h => (<span key={h} className="text-2xs font-bold text-text-ghost uppercase tracking-wider">{h}</span>))}
         </div>
         {filtered.map((f) => (
-          <div key={f.id} className={`grid grid-cols-[2fr_1fr_1.5fr_1fr_110px] px-4 py-3 border-b border-border/5 gap-2 items-center hover:bg-[#253442] transition-colors ${f.is_template ? 'border-l-2 border-l-status-amber/40' : ''}`}>
+          <div key={f.id} className={`grid grid-cols-[2fr_1fr_1.5fr_1fr_110px] px-4 py-3 border-b border-border/5 gap-2 items-center hover:bg-[#312B26] transition-colors ${f.is_template ? 'border-l-2 border-l-status-amber/40' : ''}`}>
             <div onClick={() => router.push(`/formulas/${f.id}`)} className="cursor-pointer">
               <div className="flex items-center gap-1.5">
                 <span className="text-base font-semibold text-text-dim">{f.name}</span>
@@ -244,7 +269,10 @@ export default function FormulasPage() {
             </div>
             <span className="text-sm text-text-muted">{f.client?.name || '\u2014'}</span>
             <div>
-              <div className="text-sm text-text-muted">{SPECIES_LABELS[f.species] || f.species}{f.breed ? ' \u00B7 ' + f.breed : ''}</div>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${SPECIES_BADGE_COLORS[f.species] || 'bg-white/5 text-text-ghost'}`}>{f.species === 'cattle' ? 'dairy' : f.species}</span>
+                <span className="text-sm text-text-muted">{f.breed || ''}</span>
+              </div>
               <div className="text-2xs text-text-ghost">{getStageLabel(f.species, f.production_stage)}</div>
             </div>
             <span className={`text-2xs px-2 py-0.5 rounded font-bold font-mono uppercase w-fit ${STATUS_COLORS[f.status]||''}`}>{f.status}</span>
@@ -267,10 +295,9 @@ export default function FormulasPage() {
           <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5"><h2 className="text-xl font-bold text-text">New Formula</h2><button onClick={() => setShowCreate(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button></div>
             <div className="flex flex-col gap-3.5">
-              {/* Template selector — shown first */}
               {(sameSpeciesTemplates.length > 0 || otherSpeciesTemplates.length > 0) && (
                 <div className="p-3 rounded-lg border border-status-amber/20 bg-status-amber/5">
-                  <label className="text-xs font-semibold text-status-amber block mb-1.5">\u2B50 Start from template</label>
+                  <label className="text-xs font-semibold text-status-amber block mb-1.5">{'\u2B50'} Start from template</label>
                   <select value={newTemplateId} onChange={e => setNewTemplateId(e.target.value)} className="input">
                     <option value="">Empty formula — start fresh</option>
                     {sameSpeciesTemplates.length > 0 && (
@@ -283,7 +310,7 @@ export default function FormulasPage() {
                     {otherSpeciesTemplates.length > 0 && (
                       <optgroup label="Other species">
                         {otherSpeciesTemplates.map(f => (
-                          <option key={f.id} value={f.id}>{f.name} — {SPECIES_LABELS[f.species]} \u00B7 {getStageLabel(f.species, f.production_stage)}</option>
+                          <option key={f.id} value={f.id}>{f.name} — {SPECIES_LABELS[f.species]} {'\u00B7'} {getStageLabel(f.species, f.production_stage)}</option>
                         ))}
                       </optgroup>
                     )}
@@ -291,7 +318,6 @@ export default function FormulasPage() {
                   <p className="text-2xs text-text-ghost mt-1">Copies all ingredients and inclusion rates into the new formula.</p>
                 </div>
               )}
-
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Formula Name *</label><input value={newName} onChange={e => setNewName(e.target.value)} className="input" placeholder="e.g. Early Lact — High Production 28L" /></div>
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Client</label>
                 <select value={newClientId} onChange={e => setNewClientId(e.target.value)} className="input">
