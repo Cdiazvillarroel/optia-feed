@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Home, Users, ClipboardList, Beef, Database, Package, FlaskConical, Radio,
+  Home, Users, ClipboardList, Tag, Database, Package, FlaskConical, Radio,
   BarChart3, Settings, Sparkles, ChevronLeft
 } from 'lucide-react'
 import { useState } from 'react'
@@ -13,7 +13,7 @@ const navItems = [
   { href: '/workspace', label: 'Workspace', icon: Home },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/crm', label: 'CRM', icon: ClipboardList },
-  { href: '/animals', label: 'Animals', icon: Beef },
+  { href: '/animals', label: 'Animals', icon: Tag },
   { href: '/ingredients', label: 'Ingredients', icon: Database },
   { href: '/premixes', label: 'Premixes', icon: Package },
   { href: '/formulas', label: 'Formulas', icon: FlaskConical },
@@ -84,7 +84,7 @@ export function Sidebar({ user }: SidebarProps) {
       </div>
 
       {/* Bottom */}
-      <div className="px-2 pb-4 mt-3">
+      <div className="px-2 pb-3 mt-3">
         <Link
           href="/settings"
           className={`flex items-center gap-3 px-3 py-2.5 rounded text-base font-semibold text-text-muted
@@ -95,15 +95,20 @@ export function Sidebar({ user }: SidebarProps) {
         </Link>
 
         {!collapsed && (
-          <div className="flex items-center gap-2.5 px-3 py-2.5 border-t border-border mt-1">
-            <div className="w-[30px] h-[30px] rounded-full bg-brand-dark flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-              {user.initials}
+          <>
+            <div className="flex items-center gap-2.5 px-3 py-2.5 border-t border-border mt-1">
+              <div className="w-[30px] h-[30px] rounded-full bg-brand-dark flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                {user.initials}
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-text-dim">{user.name}</div>
+                <div className="text-2xs text-text-ghost capitalize">{user.plan} Plan</div>
+              </div>
             </div>
-            <div>
-              <div className="text-sm font-semibold text-text-dim">{user.name}</div>
-              <div className="text-2xs text-text-ghost capitalize">{user.plan} Plan</div>
-            </div>
-          </div>
+            <p className="px-3 pt-2 text-[8px] leading-tight text-text-ghost/40">
+              Nutritional data from published scientific sources (CSIRO, NRC, FAO). Values are reference estimates — verify with lab analysis.
+            </p>
+          </>
         )}
       </div>
     </aside>
