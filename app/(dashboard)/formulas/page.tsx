@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy } from 'lucide-react'
+import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy, Bookmark, BookmarkCheck } from 'lucide-react'
 
 const SPECIES_OPTIONS = [
   { value: 'cattle', label: 'Dairy Cattle' },
@@ -97,6 +97,7 @@ export default function FormulasPage() {
   const [newAnimalGroupId, setNewAnimalGroupId] = useState('')
   const [newName, setNewName] = useState('')
   const [newBatch, setNewBatch] = useState('1000')
+  const [newTemplateId, setNewTemplateId] = useState('')
 
   useEffect(() => { loadData() }, [])
   useEffect(() => { setNewStage(''); setNewBreed(''); setNewAnimalGroupId('') }, [newSpecies])
@@ -122,7 +123,7 @@ export default function FormulasPage() {
 
   const filtered = formulas.filter((f) => {
     const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) || (f.client?.name||'').toLowerCase().includes(search.toLowerCase())
-    const matchStatus = !statusFilter || f.status === statusFilter
+    const matchStatus = !statusFilter ? true : statusFilter === 'template' ? f.is_template : f.status === statusFilter
     return matchSearch && matchStatus
   })
 
@@ -138,6 +139,16 @@ export default function FormulasPage() {
       animal_group_id: newAnimalGroupId || null, status: 'draft',
       batch_size_kg: parseInt(newBatch) || 1000, version: 1,
     }).select().single()
+    // Copy ingredients from template
+    if (!error && data && newTemplateId) {
+      const { data: templateIngs } = await supabase.from('formula_ingredients').select('ingredient_id, inclusion_pct, locked').eq('formula_id', newTemplateId)
+      if (templateIngs && templateIngs.length > 0) {
+        await supabase.from('formula_ingredients').insert(templateIngs.map(ti => ({
+          formula_id: data.id, ingredient_id: ti.ingredient_id,
+          inclusion_pct: ti.inclusion_pct, locked: ti.locked || false,
+        })))
+      }
+    }
     setLoading(false)
     if (!error && data) { setShowCreate(false); router.push(`/formulas/${data.id}`) }
   }
@@ -161,7 +172,26 @@ export default function FormulasPage() {
       species: orig.species, production_stage: orig.production_stage, breed: orig.breed,
       batch_size_kg: orig.batch_size_kg, status: 'draft', version: 1,
     }).select('*, client:nutrition_clients(id, name)').single()
-    if (data) { setFormulas([data, ...formulas]) }
+    if (data) {
+      // Copy ingredients
+      const { data: origIngs } = await supabase.from('formula_ingredients').select('ingredient_id, inclusion_pct, locked').eq('formula_id', id)
+      if (origIngs && origIngs.length > 0) {
+        await supabase.from('formula_ingredients').insert(origIngs.map(ti => ({
+          formula_id: data.id, ingredient_id: ti.ingredient_id,
+          inclusion_pct: ti.inclusion_pct, locked: ti.locked || false,
+        })))
+      }
+      setFormulas([data, ...formulas])
+    }
+  }
+
+  async function toggleTemplate(id: string) {
+    const supabase = await getSupabase()
+    const f = formulas.find(f => f.id === id)
+    if (!f) return
+    const newVal = !f.is_template
+    await supabase.from('formulas').update({ is_template: newVal }).eq('id', id)
+    setFormulas(formulas.map(f => f.id === id ? { ...f, is_template: newVal } : f))
   }
 
   const stageOptions = STAGES[newSpecies] || []
@@ -169,30 +199,37 @@ export default function FormulasPage() {
   const breedOptions = BREEDS[newSpecies] || []
   const filteredAnimalGroups = animalGroups.filter(ag => ag.species === newSpecies)
 
+  // Templates for the create modal — same species first, then others
+  const sameSpeciesTemplates = formulas.filter(f => f.is_template && f.species === newSpecies)
+  const otherSpeciesTemplates = formulas.filter(f => f.is_template && f.species !== newSpecies)
+
   return (
     <div className="p-7 max-w-[1200px]">
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-bold text-text">Formulas</h1>
-        <button onClick={() => { setNewName(''); setNewSpecies('cattle'); setNewStage(''); setNewBreed(''); setNewClientId(''); setNewAnimalGroupId(''); setNewBatch('1000'); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
+        <button onClick={() => { setNewName(''); setNewSpecies('cattle'); setNewStage(''); setNewBreed(''); setNewClientId(''); setNewAnimalGroupId(''); setNewBatch('1000'); setNewTemplateId(''); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
       </div>
 
       <div className="flex gap-2.5 mb-4 items-center">
         <div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-ghost" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search formulas..." className="input pl-9" /></div>
         <div className="flex gap-1">
           <button onClick={() => setStatusFilter(null)} className={`filter-pill ${!statusFilter?'active':''}`}>All</button>
-          {['draft','review','approved','active'].map(s => (<button key={s} onClick={() => setStatusFilter(statusFilter===s?null:s)} className={`filter-pill ${statusFilter===s?'active':''}`}>{s}</button>))}
+          {['draft','review','approved','active','template'].map(s => (<button key={s} onClick={() => setStatusFilter(statusFilter===s?null:s)} className={`filter-pill ${statusFilter===s?'active':''}`}>{s === 'template' ? '\u2B50 Templates' : s}</button>))}
         </div>
       </div>
 
       <div className="card">
-        <div className="grid grid-cols-[2fr_1fr_1.5fr_1fr_90px] px-4 py-2.5 border-b border-border gap-2">
+        <div className="grid grid-cols-[2fr_1fr_1.5fr_1fr_110px] px-4 py-2.5 border-b border-border gap-2">
           {['Formula','Client','Species / Stage','Status',''].map(h => (<span key={h} className="text-2xs font-bold text-text-ghost uppercase tracking-wider">{h}</span>))}
         </div>
         {filtered.map((f) => (
-          <div key={f.id} className="grid grid-cols-[2fr_1fr_1.5fr_1fr_90px] px-4 py-3 border-b border-border/5 gap-2 items-center hover:bg-[#253442] transition-colors">
+          <div key={f.id} className={`grid grid-cols-[2fr_1fr_1.5fr_1fr_110px] px-4 py-3 border-b border-border/5 gap-2 items-center hover:bg-[#253442] transition-colors ${f.is_template ? 'border-l-2 border-l-status-amber/40' : ''}`}>
             <div onClick={() => router.push(`/formulas/${f.id}`)} className="cursor-pointer">
-              <span className="text-base font-semibold text-text-dim">{f.name}</span>
-              <span className="text-xs text-text-ghost font-mono ml-2">v{f.version}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-base font-semibold text-text-dim">{f.name}</span>
+                <span className="text-xs text-text-ghost font-mono">v{f.version}</span>
+                {f.is_template && <span className="text-[9px] px-1.5 py-0.5 rounded bg-status-amber/15 text-status-amber font-bold font-mono uppercase">Template</span>}
+              </div>
             </div>
             <span className="text-sm text-text-muted">{f.client?.name || '\u2014'}</span>
             <div>
@@ -201,6 +238,7 @@ export default function FormulasPage() {
             </div>
             <span className={`text-2xs px-2 py-0.5 rounded font-bold font-mono uppercase w-fit ${STATUS_COLORS[f.status]||''}`}>{f.status}</span>
             <div className="flex items-center gap-0.5 justify-end">
+              <button onClick={() => toggleTemplate(f.id)} title={f.is_template ? 'Remove template' : 'Set as template'} className={`p-1.5 rounded bg-transparent border-none cursor-pointer ${f.is_template ? 'text-status-amber hover:text-status-amber/70' : 'text-text-ghost/40 hover:text-status-amber hover:bg-status-amber/10'}`}>{f.is_template ? <BookmarkCheck size={13}/> : <Bookmark size={13}/>}</button>
               <button onClick={() => duplicateFormula(f.id)} title="Duplicate" className="p-1.5 rounded text-text-ghost/40 hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer"><Copy size={13}/></button>
               <button onClick={() => router.push(`/formulas/${f.id}`)} title="Edit" className="p-1.5 rounded text-text-ghost/40 hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer"><Pencil size={13}/></button>
               <button onClick={() => deleteFormula(f.id)} title="Delete" className="p-1.5 rounded text-text-ghost/40 hover:text-status-red hover:bg-status-red/10 bg-transparent border-none cursor-pointer"><Trash2 size={13}/></button>
@@ -208,16 +246,41 @@ export default function FormulasPage() {
           </div>
         ))}
         {filtered.length === 0 && (
-          <div className="px-4 py-12 text-center"><FlaskConical size={32} className="text-text-ghost mx-auto mb-3" /><p className="text-sm text-text-ghost">{formulas.length===0?'No formulas yet. Create your first ration.':'No formulas match your filters.'}</p></div>
+          <div className="px-4 py-12 text-center"><FlaskConical size={32} className="text-text-ghost mx-auto mb-3" /><p className="text-sm text-text-ghost">{formulas.length===0?'No formulas yet. Create your first ration.':statusFilter==='template'?'No templates yet. Mark a formula as template with the bookmark icon.':'No formulas match your filters.'}</p></div>
         )}
       </div>
 
       {/* ── CREATE MODAL ──────────────────────────────── */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5"><h2 className="text-xl font-bold text-text">New Formula</h2><button onClick={() => setShowCreate(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button></div>
             <div className="flex flex-col gap-3.5">
+              {/* Template selector — shown first */}
+              {(sameSpeciesTemplates.length > 0 || otherSpeciesTemplates.length > 0) && (
+                <div className="p-3 rounded-lg border border-status-amber/20 bg-status-amber/5">
+                  <label className="text-xs font-semibold text-status-amber block mb-1.5">\u2B50 Start from template</label>
+                  <select value={newTemplateId} onChange={e => setNewTemplateId(e.target.value)} className="input">
+                    <option value="">Empty formula — start fresh</option>
+                    {sameSpeciesTemplates.length > 0 && (
+                      <optgroup label={SPECIES_LABELS[newSpecies] || newSpecies}>
+                        {sameSpeciesTemplates.map(f => (
+                          <option key={f.id} value={f.id}>{f.name} — {getStageLabel(f.species, f.production_stage)}{f.breed ? ' \u00B7 ' + f.breed : ''}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {otherSpeciesTemplates.length > 0 && (
+                      <optgroup label="Other species">
+                        {otherSpeciesTemplates.map(f => (
+                          <option key={f.id} value={f.id}>{f.name} — {SPECIES_LABELS[f.species]} \u00B7 {getStageLabel(f.species, f.production_stage)}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                  <p className="text-2xs text-text-ghost mt-1">Copies all ingredients and inclusion rates into the new formula.</p>
+                </div>
+              )}
+
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Formula Name *</label><input value={newName} onChange={e => setNewName(e.target.value)} className="input" placeholder="e.g. Early Lact — High Production 28L" /></div>
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Client</label>
                 <select value={newClientId} onChange={e => setNewClientId(e.target.value)} className="input">
@@ -258,7 +321,7 @@ export default function FormulasPage() {
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Batch Size (kg)</label><input type="number" value={newBatch} onChange={e => setNewBatch(e.target.value)} className="input" min="100" step="100" /></div>
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setShowCreate(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
-                <button onClick={handleCreate} disabled={loading || !newName.trim() || !newStage} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{loading?'Creating...':'Create Formula'}</button>
+                <button onClick={handleCreate} disabled={loading || !newName.trim() || !newStage} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{loading ? 'Creating...' : newTemplateId ? 'Create from Template' : 'Create Formula'}</button>
               </div>
             </div>
           </div>
