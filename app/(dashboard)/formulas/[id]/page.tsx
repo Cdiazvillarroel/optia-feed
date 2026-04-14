@@ -246,6 +246,10 @@ export default function FormulaBuilderPage() {
     const { data: f } = await supabase.from('formulas').select('*, client:nutrition_clients(id, name, location, species)').eq('id', params.id).single()
     if (!f) { router.push('/formulas'); return }
     setFormula(f); if (f.ai_review) setAiReview(f.ai_review)
+    // Load persisted production params so MP demand calculates correctly on load
+    if (f.production_params && typeof f.production_params === 'object') {
+      setProduction(prev => ({ ...f.production_params, ...prev }))
+    }
     if (f.animal_group_id) {
       const { data: ag } = await supabase.from('client_animals').select('*').eq('id', f.animal_group_id).single()
       if (ag) { const prefill: Record<string,string> = {}; if (ag.avg_weight_kg) prefill.body_weight = String(ag.avg_weight_kg); if (ag.milk_yield) prefill.milk_yield = String(ag.milk_yield); if (ag.milk_fat) prefill.milk_fat = String(ag.milk_fat); if (ag.milk_protein) prefill.milk_protein = String(ag.milk_protein); if (ag.days_in_milk) prefill.days_in_milk = String(ag.days_in_milk); if (ag.days_pregnant) prefill.days_pregnant = String(ag.days_pregnant); if (ag.target_adg) prefill.target_adg = String(ag.target_adg); if (ag.target_fcr) prefill.target_fcr = String(ag.target_fcr); if (ag.body_condition) prefill.body_condition = String(ag.body_condition); if (ag.frame_score) prefill.frame_score = String(ag.frame_score); if (ag.days_on_feed) prefill.days_on_feed = String(ag.days_on_feed); if (ag.sale_weight) prefill.sale_weight = String(ag.sale_weight); if (ag.price_per_kg) prefill.price_per_kg = String(ag.price_per_kg); setProduction(prev => ({ ...prefill, ...prev })) }
@@ -375,7 +379,7 @@ export default function FormulaBuilderPage() {
   function removeIng(idx: number){setIngs(ings.filter((_,i)=>i!==idx));setSaved(false)}
   async function addIngredient(ingId: string){if(ings.some(fi=>fi.ingredient_id===ingId))return;const supabase=await getSupabase();const{data}=await supabase.from('formula_ingredients').insert({formula_id:params.id,ingredient_id:ingId,inclusion_pct:0,locked:false}).select('*, ingredient:ingredients(*)').single();if(data){setIngs([...ings,data]);setShowAddIng(false);setSaved(false)}}
    async function handleSave(){if(errorCount>0&&!confirm(`There are ${errorCount} errors in this formula (total ≠ 100%, critical nutrients). Save anyway?`))return;setSaving(true);const supabase=await getSupabase();await supabase.from('formula_ingredients').delete().eq('formula_id',params.id);if(ings.length>0){await supabase.from('formula_ingredients').insert(ings.map(fi=>({formula_id:params.id as string,ingredient_id:fi.ingredient_id,inclusion_pct:fi.inclusion_pct,inclusion_kg:fi.inclusion_pct/100*batchKg,cost_per_tonne:prices[fi.ingredient_id]||null,locked:fi.locked})))}
-  await supabase.from('formulas').update({total_cost_per_tonne:costAF,total_cp_pct:cp,total_me_mj:isMono?primaryEnergy:me,total_income_per_day:incomePerDay,total_margin_per_day:marginPerDay}).eq('id',params.id);setSaving(false);setSaved(true)}
+  await supabase.from('formulas').update({total_cost_per_tonne:costAF,total_cp_pct:cp,total_me_mj:isMono?primaryEnergy:me,total_income_per_day:incomePerDay,total_margin_per_day:marginPerDay,production_params:production}).eq('id',params.id);setSaving(false);setSaved(true)}
   async function updateStatus(s:string){const supabase=await getSupabase();await supabase.from('formulas').update({status:s,version:(formula.version||1)+(s==='approved'?1:0)}).eq('id',params.id);setFormula({...formula,status:s,version:(formula.version||1)+(s==='approved'?1:0)})}
   function handleExport(){
     const headers=['Ingredient','DM%','Incl%DM','kg DM','kg AF',isMono?'NE MJ':'ME MJ','CP%',isMono?'SID Lys%':'Lys%',isMono?'STTD P%':'P%','Ca%','$/t','$/batch']
