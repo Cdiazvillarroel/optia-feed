@@ -13,13 +13,45 @@ const STAGES: Record<string, string[]> = {
   sheep: ['Maintenance', 'Lactation', 'Finishing', 'Lamb Creep', 'Breeding'],
 }
 
+interface FeedFlowSilo {
+  id: string
+  ingredient_name: string
+  capacity_tonnes: number
+  current_tonnes: number
+  daily_usage_tonnes: number
+  last_reading_at: string
+}
+
 interface Props {
   client: any
   animals: any[]
   formulas: any[]
+  silos?: FeedFlowSilo[]
 }
 
-export function ClientDetail({ client, animals, formulas }: Props) {
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
+
+function daysColor(days: number): string {
+  if (days <= 5) return 'text-status-red'
+  if (days <= 14) return 'text-status-amber'
+  return 'text-brand'
+}
+
+function barColor(pct: number): string {
+  if (pct <= 20) return 'bg-status-red'
+  if (pct <= 45) return 'bg-status-amber'
+  return 'bg-brand'
+}
+
+export function ClientDetail({ client, animals, formulas, silos = [] }: Props) {
   const [showEdit, setShowEdit] = useState(false)
   const [showAddAnimal, setShowAddAnimal] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -29,6 +61,10 @@ export function ClientDetail({ client, animals, formulas }: Props) {
   const router = useRouter()
 
   const totalAnimals = animals.reduce((s: number, a: any) => s + (a.count || 0), 0)
+
+  const syncedFormulas = formulas.filter((f: any) => f.feedflow_synced_at)
+  const unsyncedFormulas = formulas.filter((f: any) => !f.feedflow_synced_at)
+  const isConnected = !!client.feedflow_client_id
 
   function toggleEditSpecies(sp: string) {
     setEditSpecies(prev => prev.includes(sp) ? prev.filter(s => s !== sp) : [...prev, sp])
@@ -173,6 +209,11 @@ export function ClientDetail({ client, animals, formulas }: Props) {
               <div className="text-base font-semibold text-text-dim">{f.name}</div>
               <div className="text-xs text-text-ghost capitalize">{f.species} · {f.production_stage} · v{f.version}</div>
             </div>
+            {f.feedflow_synced_at && (
+              <span className="text-2xs text-text-ghost font-mono">
+                Synced {timeAgo(f.feedflow_synced_at)}
+              </span>
+            )}
             <span className={`text-2xs px-2 py-0.5 rounded font-bold font-mono uppercase
               ${f.status === 'draft' ? 'bg-status-amber/15 text-status-amber' :
                 f.status === 'approved' || f.status === 'active' ? 'bg-brand/15 text-brand' :
@@ -184,6 +225,106 @@ export function ClientDetail({ client, animals, formulas }: Props) {
         )) : (
           <div className="px-4 py-8 text-center text-sm text-text-ghost">
             No formulas for this client yet.
+          </div>
+        )}
+      </div>
+
+      {/* ── FEEDFLOW INVENTORY ─────────────────────────────── */}
+      <div className="card mt-4">
+        <div className="card-header">
+          <div className="flex items-center gap-2">
+            <span className="text-base font-bold text-text-dim">FeedFlow Inventory</span>
+            {isConnected && (
+              <span className="text-2xs px-2 py-0.5 rounded bg-brand/10 text-brand font-bold font-mono">CONNECTED</span>
+            )}
+          </div>
+          {isConnected && silos.length > 0 && (
+            <span className="text-xs text-text-ghost">
+              Last reading {timeAgo(silos.reduce((latest, s) =>
+                new Date(s.last_reading_at) > new Date(latest) ? s.last_reading_at : latest
+              , silos[0].last_reading_at))}
+            </span>
+          )}
+        </div>
+
+        {isConnected && silos.length > 0 ? (
+          <div className="px-4 py-2">
+            {/* Table header */}
+            <div className="flex items-center gap-3 py-2 text-xs font-semibold text-text-faint uppercase tracking-wider">
+              <span className="w-[140px]">Ingredient</span>
+              <span className="flex-1">Level</span>
+              <span className="w-[90px] text-right">Stock</span>
+              <span className="w-[50px] text-right">Days</span>
+            </div>
+            {silos.map((silo) => {
+              const pct = Math.round((silo.current_tonnes / silo.capacity_tonnes) * 100)
+              const daysLeft = silo.daily_usage_tonnes > 0
+                ? Math.round(silo.current_tonnes / silo.daily_usage_tonnes)
+                : null
+              return (
+                <div key={silo.id} className="flex items-center gap-3 py-2 border-t border-border/5">
+                  <span className="w-[140px] text-sm text-text-dim truncate">{silo.ingredient_name}</span>
+                  <div className="flex-1 h-3.5 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${barColor(pct)}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="w-[90px] text-right text-xs text-text-muted font-mono">
+                    {silo.current_tonnes} / {silo.capacity_tonnes} t
+                  </span>
+                  <span className={`w-[50px] text-right text-sm font-bold font-mono ${daysLeft !== null ? daysColor(daysLeft) : 'text-text-ghost'}`}>
+                    {daysLeft !== null ? `${daysLeft}d` : '—'}
+                  </span>
+                </div>
+              )
+            })}
+            {/* Synced formulas summary */}
+            {syncedFormulas.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-border/5">
+                <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-2">Synced formulas</div>
+                {syncedFormulas.map((f: any) => {
+                  const ago = timeAgo(f.feedflow_synced_at)
+                  const diffDays = Math.floor((Date.now() - new Date(f.feedflow_synced_at).getTime()) / 86400000)
+                  const needsResync = diffDays >= 3
+                  return (
+                    <div key={f.id} className="flex items-center justify-between py-1.5">
+                      <span className="text-sm text-text-dim">{f.name}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${needsResync ? 'bg-status-amber' : 'bg-brand'}`} />
+                        <span className={`text-xs font-mono ${needsResync ? 'text-status-amber' : 'text-text-ghost'}`}>
+                          {needsResync ? `${ago} — needs re-sync` : ago}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        ) : isConnected && silos.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-text-ghost">
+            Connected to FeedFlow but no silos configured yet.
+          </div>
+        ) : (
+          /* Not connected — CTA */
+          <div className="px-4 py-6">
+            <div className="border border-dashed border-border/30 rounded-lg p-6 text-center">
+              <p className="text-sm text-text-muted mb-1">
+                {client.name} is not connected to FeedFlow yet.
+              </p>
+              <p className="text-xs text-text-ghost mb-4">
+                Connect to see real-time silo levels, days of stock, and sync formulas to the mixer wagon automatically.
+              </p>
+              <button className="btn btn-primary btn-sm">
+                Connect to FeedFlow
+              </button>
+              {unsyncedFormulas.length > 0 && (
+                <p className="text-xs text-text-ghost mt-3">
+                  {unsyncedFormulas.length} formula{unsyncedFormulas.length > 1 ? 's' : ''} ready to sync
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>
