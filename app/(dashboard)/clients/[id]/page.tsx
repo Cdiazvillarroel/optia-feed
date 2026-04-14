@@ -42,7 +42,7 @@ export default function ClientDetailPage() {
     setClient(c)
     setEditSpecies(c.species || [])
     setAnimalSpecies(c.species?.[0] || 'cattle')
-    const { data: a } = await supabase.from('client_animals').select('*, formula:formulas(id, name, status)').eq('client_id', params.id).order('name')
+    const { data: a } = await supabase.from('client_animals').select('*, formula:formulas!client_animals_formula_id_fkey(id, name, status)')
     setAnimals(a || [])
     const { data: f } = await supabase.from('formulas').select('*').eq('client_id', params.id).not('status','eq','archived').order('updated_at', { ascending: false })
     setFormulas(f || [])
