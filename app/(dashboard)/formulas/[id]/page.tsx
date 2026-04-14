@@ -193,11 +193,45 @@ export default function FormulaBuilderPage() {
     const { data: f } = await supabase.from('formulas').select('*, client:nutrition_clients(id, name, location, species)').eq('id', params.id).single()
     if (!f) { router.push('/formulas'); return }
     setFormula(f); if (f.ai_review) setAiReview(f.ai_review)
+    // Load linked animal group and pre-fill production
+    if (f.animal_group_id) {
+      const { data: ag } = await supabase.from('client_animals').select('*').eq('id', f.animal_group_id).single()
+      if (ag) {
+        const prefill: Record<string,string> = {}
+        if (ag.avg_weight_kg) prefill.body_weight = String(ag.avg_weight_kg)
+        if (ag.milk_yield) prefill.milk_yield = String(ag.milk_yield)
+        if (ag.milk_fat) prefill.milk_fat = String(ag.milk_fat)
+        if (ag.milk_protein) prefill.milk_protein = String(ag.milk_protein)
+        if (ag.days_in_milk) prefill.days_in_milk = String(ag.days_in_milk)
+        if (ag.days_pregnant) prefill.days_pregnant = String(ag.days_pregnant)
+        if (ag.target_adg) prefill.target_adg = String(ag.target_adg)
+        if (ag.target_fcr) prefill.target_fcr = String(ag.target_fcr)
+        if (ag.body_condition) prefill.body_condition = String(ag.body_condition)
+        if (ag.frame_score) prefill.frame_score = String(ag.frame_score)
+        if (ag.days_on_feed) prefill.days_on_feed = String(ag.days_on_feed)
+        if (ag.sale_weight) prefill.sale_weight = String(ag.sale_weight)
+        if (ag.price_per_kg) prefill.price_per_kg = String(ag.price_per_kg)
+        setProduction(prev => ({ ...prefill, ...prev }))
+      }
+    }
     const { data: fi } = await supabase.from('formula_ingredients').select('*, ingredient:ingredients(*)').eq('formula_id', params.id)
     setIngs(fi || [])
     const { data: allIng } = await supabase.from('ingredients').select('*').or(`nutritionist_id.is.null${user?',nutritionist_id.eq.'+user.id:''}`).order('name')
     setAllIngredients(allIng || [])
-    const { data: req } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).is('nutritionist_id', null).limit(1).single()
+    // Load requirements: breed-specific → generic → any match
+    let req = null
+    if (f.breed) {
+      const { data: breedReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).eq('breed', f.breed).is('nutritionist_id', null).limit(1).single()
+      req = breedReq
+    }
+    if (!req) {
+      const { data: genericReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).is('nutritionist_id', null).is('breed', null).limit(1).single()
+      req = genericReq
+    }
+    if (!req) {
+      const { data: anyReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).is('nutritionist_id', null).limit(1).single()
+      req = anyReq
+    }
     if (req) { setRequirements(req.requirements||[]); setRatios(req.ratios||[]); setStageName(req.stage_name||f.production_stage) }
     const { data: rules } = await supabase.from('safety_rules').select('*').eq('species', f.species).is('nutritionist_id', null).eq('active', true)
     setSafetyRules(rules || [])
