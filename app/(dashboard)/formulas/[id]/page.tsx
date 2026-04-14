@@ -18,6 +18,13 @@ const PRODUCTION_FIELDS: Record<string, { key: string; label: string; unit: stri
 }
 
 // ── NUTRITION MODELS ─────────────────────────────────────
+const NUT_MODELS = {
+  AFRC: { label:'AFRC', desc:'UK/AU/NZ', mcpCoeff:11, mcpNCoeff:0.8, mpMicDig:0.75, mpMicAA:0.85, mpBypDig:0.90, kpF:0.03, kpC:0.05, udpLabel:'UDP', rdpLabel:'RDP' },
+  NRC: { label:'NRC 2001', desc:'US/CA', mcpCoeff:0.13, mcpNCoeff:0.85, mpMicDig:0.80, mpMicAA:0.80, mpBypDig:0.80, kpF:0.035, kpC:0.06, udpLabel:'RUP', rdpLabel:'RDP' },
+  CNCPS: { label:'CNCPS v6', desc:'Cornell', mcpCoeff:11, mcpNCoeff:0.85, mpMicDig:0.75, mpMicAA:0.85, mpBypDig:0.80, kpF:0.04, kpC:0.06, udpLabel:'RUP', rdpLabel:'RDP' },
+}
+type NutModelKey = keyof typeof NUT_MODELS
+
 function predictDMI_NRC(bw: number, my: number, mf: number, dim: number): number {
   const fcm = my * (0.4 + 15 * (mf / 100))
   const wol = dim / 7
@@ -60,28 +67,35 @@ function effectiveDeg(aN: number, bN: number, cN: number, kp: number): number {
   return cN + kp === 0 ? aN : aN + (bN * cN) / (cN + kp)
 }
 
-function calculateMP(ings: any[], totalME: number, dmi: number) {
+function calculateMP(ings: any[], totalME: number, dmi: number, model: NutModelKey = 'AFRC') {
+  const m = NUT_MODELS[model]
   let totalRDP_pct = 0, totalUDP_pct = 0, totalCP_pct = 0
   ings.forEach(fi => {
     const ing = fi.ingredient; if (!ing || !ing.cp_pct) return
     const cpC = ing.cp_pct * (fi.inclusion_pct || 0) / 100; totalCP_pct += cpC
     if (ing.an_frac != null && ing.bn_frac != null && ing.cn_rate != null) {
-      const kp = ing.particle_class === 'forage' ? 0.03 : 0.05
+      const kp = ing.particle_class === 'forage' ? m.kpF : m.kpC
       const deg = effectiveDeg(ing.an_frac, ing.bn_frac, ing.cn_rate, kp)
       totalRDP_pct += cpC * deg; totalUDP_pct += cpC * (1 - deg)
     } else { totalRDP_pct += cpC * 0.65; totalUDP_pct += cpC * 0.35 }
   })
-  // Convert to g/d using DMI
   const totalRDP = totalRDP_pct / 100 * dmi * 1000
   const totalUDP = totalUDP_pct / 100 * dmi * 1000
   const totalCP = totalCP_pct / 100 * dmi * 1000
-  const fme = totalME * 0.85 * dmi // MJ/d
-  const mcpE = 11 * fme // g MCP/d (11g microbial protein per MJ FME)
-  const mcpN = 0.8 * totalRDP // g MCP/d (N-limited)
+  const fme = totalME * 0.85 * dmi
+  let mcpE: number, mcpN: number
+  if (model === 'NRC') {
+    const tdn_pct = (totalME / 0.82) * 100 / 18.4
+    mcpE = m.mcpCoeff * (tdn_pct / 100 * dmi) * 1000
+    mcpN = m.mcpNCoeff * totalRDP
+  } else {
+    mcpE = m.mcpCoeff * fme
+    mcpN = m.mcpNCoeff * totalRDP
+  }
   const mcp = Math.min(mcpE, mcpN)
-  const mpMic = mcp * 0.75 * 0.85
-  const mpByp = totalUDP * 0.90
-  return { totalCP, totalRDP, totalUDP, fme, mcp, mpFromMicrobes: mpMic, mpFromBypass: mpByp, mpSupply: mpMic + mpByp }
+  const mpMic = mcp * m.mpMicDig * m.mpMicAA
+  const mpByp = totalUDP * m.mpBypDig
+  return { totalCP, totalRDP, totalUDP, fme, mcp, mcpE, mcpN, mpFromMicrobes: mpMic, mpFromBypass: mpByp, mpSupply: mpMic + mpByp }
 }
 
 function calculateMPDemand(species: string, prod: Record<string,string>): number {
@@ -254,6 +268,7 @@ export default function FormulaBuilderPage() {
   const [aiQuestion, setAiQuestion] = useState('')
   const [basis, setBasis] = useState<'dm'|'asfed'>('dm')
   const [ingCatFilter, setIngCatFilter] = useState('')
+  const [nutModel, setNutModel] = useState<NutModelKey>('AFRC')
   const [showOptimizer, setShowOptimizer] = useState(false)
   const [optRunning, setOptRunning] = useState(false)
   const [optResult, setOptResult] = useState<any>(null)
@@ -359,7 +374,8 @@ export default function FormulaBuilderPage() {
   const dmiPct = predictedDMI > 0 && actualDMI > 0 ? (actualDMI / predictedDMI * 100) : 0
 
   // MP model (g/d using DMI)
-  const mpData=calculateMP(ings,me,useDMI)
+  const curModel = NUT_MODELS[nutModel]
+  const mpData=calculateMP(ings,me,useDMI,nutModel)
   const mpDemand=formula?calculateMPDemand(formula.species,production):0
   const mpBalance=mpData.mpSupply-mpDemand
 
@@ -399,7 +415,7 @@ export default function FormulaBuilderPage() {
       const afKg = dmKg / ((ing?.dm_pct || 88) / 100)
       return [ing?.name, ing?.category, ing?.particle_class, fi.inclusion_pct.toFixed(2), dmKg.toFixed(1), afKg.toFixed(1), ing?.dm_pct, ing?.cp_pct, ing?.me_mj, ing?.ndf_pct, ing?.adf_pct, ing?.ee_pct, ing?.starch_pct, ing?.ca_pct, ing?.p_pct, ing?.nem_mj||nem.toFixed(2), ing?.nel_mj||nel.toFixed(2), ing?.an_frac, ing?.bn_frac, ing?.cn_rate, prices[fi.ingredient_id] || ''].join(',')
     })
-    const meta = [`# Formula: ${formula.name}`,`# Version: ${formula.version}`,`# Species: ${formula.species}`,`# Stage: ${stageName || formula.production_stage}`,`# Client: ${formula.client?.name || 'N/A'}`,`# Batch: ${batchKg} kg`,`# Date: ${new Date().toISOString().split('T')[0]}`,`# Cost/t AF: $${costAF.toFixed(0)}`,`# CP: ${cp.toFixed(1)}%  ME: ${me.toFixed(1)} MJ  NDF: ${ndf.toFixed(1)}%  F:C: ${fcRatio}`,`# MP Supply: ${mpData.mpSupply.toFixed(0)}g/d  Demand: ${mpDemand.toFixed(0)}g/d  Balance: ${mpBalance.toFixed(0)}g/d`,`# NEl: ${nel.toFixed(1)} MJ  NEm: ${nem.toFixed(1)} MJ  NEg: ${neg.toFixed(1)} MJ  TDN: ${tdn.toFixed(1)}%`,`# Model: AFRC/CSIRO`,'']
+    const meta = [`# Formula: ${formula.name}`,`# Version: ${formula.version}`,`# Species: ${formula.species}`,`# Stage: ${stageName || formula.production_stage}`,`# Client: ${formula.client?.name || 'N/A'}`,`# Batch: ${batchKg} kg`,`# Date: ${new Date().toISOString().split('T')[0]}`,`# Cost/t AF: $${costAF.toFixed(0)}`,`# CP: ${cp.toFixed(1)}%  ME: ${me.toFixed(1)} MJ  NDF: ${ndf.toFixed(1)}%  F:C: ${fcRatio}`,`# MP Supply: ${mpData.mpSupply.toFixed(0)}g/d  Demand: ${mpDemand.toFixed(0)}g/d  Balance: ${mpBalance.toFixed(0)}g/d`,`# NEl: ${nel.toFixed(1)} MJ  NEm: ${nem.toFixed(1)} MJ  NEg: ${neg.toFixed(1)} MJ  TDN: ${tdn.toFixed(1)}%`,`# Model: ${curModel.label}`,'']
     const csv = [...meta, headers.join(','), ...rows].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -423,8 +439,8 @@ export default function FormulaBuilderPage() {
   function clearSlot(idx: number) { const s=[...compareSlots]; s[idx]=null; setCompareSlots(s) }
 
   // ── AI ──────────────────────────────────────────────────
-  function buildCtx(){return`FORMULA: ${formula.name} (v${formula.version})\nSPECIES: ${formula.species} | STAGE: ${stageName}\nCP:${cp.toFixed(1)}% ME:${me.toFixed(1)} NDF:${ndf.toFixed(1)}% F:C:${fcRatio} peNDF:${peNDF.toFixed(1)}% DCAD:${dcad.toFixed(0)}\nMP supply:${mpData.mpSupply.toFixed(0)}g/d demand:${mpDemand.toFixed(0)}g/d balance:${mpBalance>0?'+':''}${mpBalance.toFixed(0)}g/d\nDMI:${useDMI.toFixed(1)}kg/d NEl:${nel.toFixed(1)} NEm:${nem.toFixed(1)} NEg:${neg.toFixed(1)} TDN:${tdn.toFixed(1)}%\nCost:$${costAF.toFixed(0)}/t Margin:$${marginPerDay.toFixed(2)}/d\n${ings.map(fi=>`${fi.ingredient?.name}: ${fi.inclusion_pct.toFixed(1)}% ${fi.ingredient?.particle_class==='forage'?'[F]':'[C]'}`).join('\n')}`}
-  async function handleAiReview(){setAiLoading(true);setShowAi(true);setAiReview(null);try{const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:`Full review. MP, DMI, F:C, DCAD, methane, margin, energy systems. AU context.\n\n${buildCtx()}`})});const data=await res.json();setAiReview(data.response||'No response.');const supabase=await getSupabase();await supabase.from('formulas').update({ai_review:data.response,ai_reviewed_at:new Date().toISOString()}).eq('id',params.id)}catch{setAiReview('Error.')}setAiLoading(false)}
+  function buildCtx(){return`FORMULA: ${formula.name} (v${formula.version})\nSPECIES: ${formula.species} | STAGE: ${stageName} | MODEL: ${curModel.label}\nCP:${cp.toFixed(1)}% ME:${me.toFixed(1)} NDF:${ndf.toFixed(1)}% F:C:${fcRatio} peNDF:${peNDF.toFixed(1)}% DCAD:${dcad.toFixed(0)}\nMP supply:${mpData.mpSupply.toFixed(0)}g/d demand:${mpDemand.toFixed(0)}g/d balance:${mpBalance>0?'+':''}${mpBalance.toFixed(0)}g/d (${curModel.label} model, kp forage=${curModel.kpF} conc=${curModel.kpC})\nDMI:${useDMI.toFixed(1)}kg/d NEl:${nel.toFixed(1)}MJ NEm:${nem.toFixed(1)}MJ NEg:${neg.toFixed(1)}MJ TDN:${tdn.toFixed(1)}%\nCost:$${costAF.toFixed(0)}/t Margin:$${marginPerDay.toFixed(2)}/d\n${ings.map(fi=>`${fi.ingredient?.name}: ${fi.inclusion_pct.toFixed(1)}% ${fi.ingredient?.particle_class==='forage'?'[F]':'[C]'}`).join('\n')}`}
+  async function handleAiReview(){setAiLoading(true);setShowAi(true);setAiReview(null);try{const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:`Full review using ${curModel.label} model. MP, DMI, F:C, DCAD, methane, margin, energy systems. AU context.\n\n${buildCtx()}`})});const data=await res.json();setAiReview(data.response||'No response.');const supabase=await getSupabase();await supabase.from('formulas').update({ai_review:data.response,ai_reviewed_at:new Date().toISOString()}).eq('id',params.id)}catch{setAiReview('Error.')}setAiLoading(false)}
   async function handleAiQ(){if(!aiQuestion.trim())return;setAiLoading(true);const q=aiQuestion;setAiQuestion('');try{const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:`${q}\n\n${buildCtx()}`})});const data=await res.json();setAiReview(data.response||'No response.')}catch{setAiReview('Error.')}setAiLoading(false)}
 
   if (!formula) return <div className="p-7 text-text-ghost">Loading...</div>
@@ -458,6 +474,7 @@ export default function FormulaBuilderPage() {
       {/* Summary Bar */}
       <div className="flex items-center gap-2 mb-2 px-2.5 py-1 bg-surface-card rounded-lg border border-border text-xs flex-wrap">
         <button onClick={()=>setBasis(basis==='dm'?'asfed':'dm')} className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-border bg-surface-deep cursor-pointer hover:border-brand/30">{basis==='dm'?<ToggleLeft size={12} className="text-brand"/>:<ToggleRight size={12} className="text-status-amber"/>}<span className={`font-bold font-mono text-2xs ${basis==='dm'?'text-brand':'text-status-amber'}`}>{basis==='dm'?'DM':'AF'}</span></button>
+        <select value={nutModel} onChange={e=>setNutModel(e.target.value as NutModelKey)} className="px-1.5 py-0.5 rounded-md border border-border bg-surface-deep text-2xs font-bold font-mono text-text-dim cursor-pointer outline-none">{(Object.keys(NUT_MODELS) as NutModelKey[]).map(k=>(<option key={k} value={k}>{NUT_MODELS[k].label}</option>))}</select>
         <span className="font-mono font-bold text-brand">{metC}met</span>{warnC>0&&<span className="font-mono font-bold text-status-amber">{warnC}w</span>}{failC>0&&<span className="font-mono font-bold text-status-red">{failC}c</span>}
         <span className="text-text-ghost">|</span><span className={`font-mono font-bold ${totalPctDM>100.1||totalPctDM<99.9?'text-status-red':'text-brand'}`}>{totalPctDM.toFixed(1)}%</span>
         <span className="text-text-ghost">F:C</span><span className="font-mono font-bold text-text-dim">{fcRatio}</span>
@@ -478,11 +495,7 @@ export default function FormulaBuilderPage() {
               <button onClick={()=>toggleLock(idx)} className={`bg-transparent border-none cursor-pointer flex ${fi.locked?'text-status-amber':'text-text-ghost/30'}`}>{fi.locked?<Lock size={11}/>:<Unlock size={11}/>}</button>
               <div><div className="text-sm font-semibold text-text-dim truncate">{ing.name}</div><div className="text-[10px] text-text-ghost font-mono">{ing.category}{price?' $'+price.toFixed(0):''}</div></div>
               <input type="range" min="0" max="60" step="0.5" value={fi.inclusion_pct} onChange={e=>updateIngPct(idx,parseFloat(e.target.value))}/>
-              <div className="flex items-center border border-border rounded bg-surface-deep overflow-hidden">
-              <button onClick={()=>updateIngPct(idx,Math.max(0,fi.inclusion_pct-0.5))} className="w-5 h-5 flex items-center justify-center text-text-ghost hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer text-xs font-bold">−</button>
-              <input type="text" value={fi.inclusion_pct} onChange={e=>updateIngPct(idx,parseFloat(e.target.value)||0)} className="w-8 py-0.5 border-none bg-transparent text-text-dim text-xs font-mono text-center outline-none"/>
-              <button onClick={()=>updateIngPct(idx,Math.min(100,fi.inclusion_pct+0.5))} className="w-5 h-5 flex items-center justify-center text-text-ghost hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer text-xs font-bold">+</button>
-              </div>
+              <input type="number" value={fi.inclusion_pct} step="0.5" min="0" max="100" onChange={e=>updateIngPct(idx,parseFloat(e.target.value)||0)} className="w-full px-1 py-0.5 rounded border border-border bg-surface-deep text-text-dim text-xs font-mono text-right outline-none focus:border-brand"/>
               <span className="text-[10px] text-text-ghost font-mono text-right">{dispKg.toFixed(0)}kg</span>
               <span className={`text-[10px] font-mono text-center ${ing.particle_class==='forage'?'text-brand':'text-text-ghost'}`}>{ing.particle_class==='forage'?'F':'C'}</span>
               <button onClick={()=>removeIng(idx)} className="bg-transparent border-none cursor-pointer text-text-ghost/30 hover:text-status-red"><X size={11}/></button>
@@ -516,14 +529,18 @@ export default function FormulaBuilderPage() {
           {/* RUMEN */}
           {rightTab==='rumen'&&<div className="card p-2.5 flex-1 overflow-auto">
             {isRuminant?<>
-              <div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">Metabolisable Protein</div>
+              <div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">Metabolisable Protein <span className="text-text-ghost font-normal normal-case">({curModel.label})</span></div>
               <div className={`text-center text-xs font-bold font-mono mb-2 px-2 py-1.5 rounded-lg ${mpBalance>=0?'bg-brand/10 text-brand':'bg-status-red/10 text-status-red'}`}>MP: {mpData.mpSupply.toFixed(0)}g supply / {mpDemand.toFixed(0)}g demand = {mpBalance>0?'+':''}{mpBalance.toFixed(0)} g/d</div>
-              {[['RDP',mpData.totalRDP,'g/d'],['UDP',mpData.totalUDP,'g/d'],['FME',mpData.fme,'MJ/d'],['MCP',mpData.mcp,'g/d'],['MP microbes',mpData.mpFromMicrobes,'g/d'],['MP bypass',mpData.mpFromBypass,'g/d']].map(([l,v,u])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{(v as number).toFixed(0)} {u}</span></div>))}
+              {[[curModel.rdpLabel,mpData.totalRDP,'g/d'],[curModel.udpLabel,mpData.totalUDP,'g/d'],['FME',mpData.fme,'MJ/d'],['MCP',mpData.mcp,'g/d'],['MP microbes',mpData.mpFromMicrobes,'g/d'],['MP bypass',mpData.mpFromBypass,'g/d']].map(([l,v,u])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{(v as number).toFixed(0)} {u}</span></div>))}
               <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Rumen Health</div>
               {[['F:C',fcRatio,foragePct<30?'text-status-red':foragePct<40?'text-status-amber':'text-brand'],['peNDF',peNDF.toFixed(1)+'%',peNDF<18?'text-status-red':peNDF<22?'text-status-amber':'text-brand'],['DCAD',dcad.toFixed(0)+' mEq/kg','text-text-dim']].map(([l,v,c])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className={`text-[10px] font-mono font-bold ${c}`}>{v}</span></div>))}</div>
               {dmiPct>0&&<div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">DMI</div><div className={`text-center text-xs font-bold font-mono px-2 py-1 rounded ${dmiPct>102?'bg-status-red/10 text-status-red':dmiPct>95?'bg-brand/10 text-brand':'bg-status-amber/10 text-status-amber'}`}>Actual {actualDMI.toFixed(1)} / Predicted {predictedDMI.toFixed(1)} = {dmiPct.toFixed(0)}%</div></div>}
-              <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Energy Systems</div>
-              {[['ME',me.toFixed(1)+' MJ/kg'],['DE',de.toFixed(1)+' MJ/kg'],['TDN',tdn.toFixed(1)+'%'],['NEl',nel.toFixed(1)+' MJ/kg'],['NEm',nem.toFixed(1)+' MJ/kg'],['NEg',neg.toFixed(1)+' MJ/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{v}</span></div>))}</div>
+              <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Energy Systems <span className="text-text-ghost font-normal normal-case">({curModel.label})</span></div>
+              {nutModel==='NRC'?
+                [['NEL',(nel/4.184).toFixed(2)+' Mcal/kg'],['NEm',(nem/4.184).toFixed(2)+' Mcal/kg'],['NEg',(neg/4.184).toFixed(2)+' Mcal/kg'],['TDN',tdn.toFixed(1)+'%'],['ME',me.toFixed(1)+' MJ/kg'],['DE',de.toFixed(1)+' MJ/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{v}</span></div>))
+              :
+                [['ME',me.toFixed(1)+' MJ/kg'],['DE',de.toFixed(1)+' MJ/kg'],['TDN',tdn.toFixed(1)+'%'],['NEl',nel.toFixed(1)+' MJ/kg'],['NEm',nem.toFixed(1)+' MJ/kg'],['NEg',neg.toFixed(1)+' MJ/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{v}</span></div>))
+              }</div>
               <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Methane</div>{[['CH\u2084',methane.ch4_g.toFixed(0)+' g/d'],['CH\u2084/kg DMI',methane.ch4_int.toFixed(1)+' g/kg']].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono text-text-dim">{v}</span></div>))}</div>
             </>:<><div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">Amino Acids</div>{[['Lysine',lys],['Methionine',met2],['Threonine',thr]].map(([l,v])=>(<div key={l as string} className="flex justify-between py-1"><span className="text-xs text-text-muted">{l}</span><span className="text-sm font-mono font-bold text-text-dim">{(v as number).toFixed(3)}%</span></div>))}</>}
           </div>}
@@ -552,7 +569,7 @@ export default function FormulaBuilderPage() {
                 {/* Grid circles */}
                 {[0.25,0.5,0.75,1.0].map(s=>(<circle key={s} cx={cx} cy={cy} r={r*s} fill="none" stroke="var(--b)" strokeWidth="0.3" strokeDasharray="2 2"/>))}
                 {/* Spokes + labels */}
-                {nutrients.map((nt,i)=>{const end=toXY(i,maxVals[i],maxVals[i]);const lbl=toXY(i,maxVals[i]*1.18,maxVals[i]);return(<g key={nt.l}><line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="var(--b)" strokeWidth="0.3"/><text x={lbl.x} y={lbl.y} textAnchor="middle" dominantBaseline="central" fill="var(--p)" fontSize="9" fontWeight="500">{nt.l}</text></g>)})}
+                {nutrients.map((nt,i)=>{const end=toXY(i,maxVals[i],maxVals[i]);const lbl=toXY(i,maxVals[i]*1.18,maxVals[i]);return(<g key={nt.l}><line x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="var(--b)" strokeWidth="0.3"/><text x={lbl.x} y={lbl.y} textAnchor="middle" dominantBaseline="central" fill="var(--s)" fontSize="9" fontWeight="500">{nt.l}</text></g>)})}
                 {/* Requirement range (green band) */}
                 <path d={toPath(reqMaxPts)} fill="#4CAF7D" fillOpacity="0.12" stroke="#4CAF7D" strokeWidth="0.5" strokeOpacity="0.3"/>
                 <path d={toPath(reqMinPts)} fill="var(--bg2)" fillOpacity="0.8" stroke="#4CAF7D" strokeWidth="0.5" strokeOpacity="0.3" strokeDasharray="2 2"/>
