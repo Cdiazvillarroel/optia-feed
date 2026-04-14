@@ -478,7 +478,11 @@ export default function FormulaBuilderPage() {
               <button onClick={()=>toggleLock(idx)} className={`bg-transparent border-none cursor-pointer flex ${fi.locked?'text-status-amber':'text-text-ghost/30'}`}>{fi.locked?<Lock size={11}/>:<Unlock size={11}/>}</button>
               <div><div className="text-sm font-semibold text-text-dim truncate">{ing.name}</div><div className="text-[10px] text-text-ghost font-mono">{ing.category}{price?' $'+price.toFixed(0):''}</div></div>
               <input type="range" min="0" max="60" step="0.5" value={fi.inclusion_pct} onChange={e=>updateIngPct(idx,parseFloat(e.target.value))}/>
-              <input type="number" value={fi.inclusion_pct} step="0.5" min="0" max="100" onChange={e=>updateIngPct(idx,parseFloat(e.target.value)||0)} className="w-full px-1 py-0.5 rounded border border-border bg-surface-deep text-text-dim text-xs font-mono text-right outline-none focus:border-brand"/>
+              <div className="flex items-center border border-border rounded bg-surface-deep overflow-hidden">
+              <button onClick={()=>updateIngPct(idx,Math.max(0,fi.inclusion_pct-0.5))} className="w-5 h-5 flex items-center justify-center text-text-ghost hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer text-xs font-bold">−</button>
+              <input type="text" value={fi.inclusion_pct} onChange={e=>updateIngPct(idx,parseFloat(e.target.value)||0)} className="w-8 py-0.5 border-none bg-transparent text-text-dim text-xs font-mono text-center outline-none"/>
+              <button onClick={()=>updateIngPct(idx,Math.min(100,fi.inclusion_pct+0.5))} className="w-5 h-5 flex items-center justify-center text-text-ghost hover:text-brand hover:bg-brand/10 bg-transparent border-none cursor-pointer text-xs font-bold">+</button>
+              </div>
               <span className="text-[10px] text-text-ghost font-mono text-right">{dispKg.toFixed(0)}kg</span>
               <span className={`text-[10px] font-mono text-center ${ing.particle_class==='forage'?'text-brand':'text-text-ghost'}`}>{ing.particle_class==='forage'?'F':'C'}</span>
               <button onClick={()=>removeIng(idx)} className="bg-transparent border-none cursor-pointer text-text-ghost/30 hover:text-status-red"><X size={11}/></button>
