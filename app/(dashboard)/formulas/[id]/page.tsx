@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { Plus, Sparkles, Save, Lock, Unlock, X, Search, ChevronDown, ChevronUp, Loader2, ToggleLeft, ToggleRight, Zap, GitCompare, RotateCcw, Download } from 'lucide-react'
-
+import { Plus, Sparkles, Save, Lock, Unlock, X, Search, ChevronDown, ChevronUp, Loader2, ToggleLeft, ToggleRight, Zap, GitCompare, RotateCcw, Download, Shield } from 'lucide-react'
+import ProfileEditorModal from '@/components/ProfileEditorModal'
 interface Req { nutrient: string; unit: string; min: number|null; max: number|null; target: number; critical_max?: number|null; critical_min?: number|null }
 interface Ratio { name: string; min: number; max: number; target: number; unit?: string }
 interface CompareSlot { name: string; ings: any[]; production: Record<string,string>; nutrients: Record<string,number>; cost: number; margin: number; mp: number; fc: string; timestamp: Date }
@@ -277,7 +277,8 @@ export default function FormulaBuilderPage() {
   const [showCompare, setShowCompare] = useState(false)
   const [compareSlots, setCompareSlots] = useState<(CompareSlot|null)[]>([null, null, null, null])
   // ── CHANGE 3.1: Track where requirements came from ──
-  const [profileSource, setProfileSource] = useState<'linked'|'legacy'|'none'>('none')
+   const [profileSource, setProfileSource] = useState<'linked'|'legacy'|'none'>('none')
+  const [showProfileEditor, setShowProfileEditor] = useState(false)
 
   const speciesMode: SpeciesMode = formula ? getSpeciesMode(formula.species) : 'ruminant'
   const isRuminant = speciesMode === 'ruminant'
@@ -572,6 +573,7 @@ export default function FormulaBuilderPage() {
           <p className="text-xs text-text-ghost mt-0.5">{formula.client?.name||'—'} · {formula.species} · {stageName||formula.production_stage} · {batchKg}kg</p>
         </div>
         <div className="flex gap-1.5">
+          <button onClick={()=>setShowProfileEditor(true)} className="btn btn-ghost btn-sm" title="Profile"><Shield size={14}/> Profile</button>
           <button onClick={()=>setShowCompare(true)} className="btn btn-ghost btn-sm" title="Compare"><GitCompare size={14}/> Compare</button>
           <button onClick={()=>{setOptResult(null);setShowOptimizer(true)}} className="btn btn-ghost btn-sm" title="Optimize"><Zap size={14}/> Optimize</button>
           <button onClick={handleExport} className="btn btn-ghost btn-sm" title="Export CSV"><Download size={14}/> Export</button>
@@ -775,6 +777,26 @@ export default function FormulaBuilderPage() {
         <div className="flex-1 overflow-auto p-4">{aiLoading&&!aiReview&&<div className="flex items-center gap-3 text-text-ghost"><Loader2 size={16} className="animate-spin"/> Analyzing {speciesMode} diet...</div>}{aiReview&&<div className="text-sm text-text-dim leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{__html:aiReview.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br/>')}}/>}</div>
         <div className="p-4 border-t border-border flex gap-2"><input value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAiQ()} placeholder="Ask..." className="flex-1 px-3 py-2 rounded-lg border border-border bg-surface-deep text-text-dim text-sm outline-none focus:border-brand"/><button onClick={handleAiQ} disabled={aiLoading} className="btn btn-primary btn-sm">{aiLoading?<Loader2 size={14} className="animate-spin"/>:'Ask'}</button><button onClick={handleAiReview} disabled={aiLoading} className="btn btn-ai btn-sm">Re-review</button></div>
       </div></div>}
+    // FIND:
+      {showAi&&<div className="fixed inset-0 bg-black/40 z-50
+      ...
+      </div></div>}
+    </div>
+  )
+}
+
+// REPLACE (agregar antes del cierre):
+      {showAi&&<div className="fixed inset-0 bg-black/40 z-50
+      ...
+      </div></div>}
+
+      {/* PROFILE EDITOR */}
+      <ProfileEditorModal
+        open={showProfileEditor}
+        onClose={() => setShowProfileEditor(false)}
+        species={formula?.species}
+        stage={formula?.production_stage}
+      />
     </div>
   )
 }
