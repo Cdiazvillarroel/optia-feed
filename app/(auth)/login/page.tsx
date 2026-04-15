@@ -2,29 +2,26 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [mode, setMode] = useState<'login' | 'signup'>('login')
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  const isWelcome = searchParams?.get('welcome') === 'true'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
     try {
-      if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password })
-        if (error) throw error
-      }
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) throw error
       router.push('/workspace')
       router.refresh()
     } catch (err: any) {
@@ -61,13 +58,20 @@ export default function LoginPage() {
 
         {/* Card */}
         <div className="card p-6">
+          {isWelcome && (
+            <div className="bg-[#2E6B42]/15 border border-[#2E6B42]/30 rounded-lg px-4 py-3 mb-4">
+              <p className="text-sm font-semibold text-[#5dca7a]">Account created!</p>
+              <p className="text-xs text-[#5dca7a]/80 mt-0.5">Your 24-hour trial is active. Sign in with the password you just created.</p>
+            </div>
+          )}
+
           <h1 className="text-xl font-bold text-text mb-1">
-            {mode === 'login' ? 'Welcome back' : 'Create account'}
+            {isWelcome ? 'Sign in to get started' : 'Welcome back'}
           </h1>
           <p className="text-sm text-text-faint mb-6">
-            {mode === 'login'
-              ? 'Sign in to your nutrition platform'
-              : 'Start formulating smarter rations'}
+            {isWelcome
+              ? 'Use the email and password from your signup'
+              : 'Sign in to your nutrition platform'}
           </p>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -85,17 +89,17 @@ export default function LoginPage() {
               <p className="text-sm text-status-red bg-status-red/10 rounded px-3 py-2">{error}</p>
             )}
             <button type="submit" disabled={loading} className="btn btn-primary w-full justify-center mt-1">
-              {loading ? 'Loading...' : mode === 'login' ? 'Sign in' : 'Create account'}
+              {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
 
           <div className="mt-4 text-center">
-            <button
-              onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
-              className="text-sm text-brand hover:underline bg-transparent border-none cursor-pointer"
+            <a
+              href="https://optiafeed.cloud/#trial"
+              className="text-sm text-brand hover:underline"
             >
-              {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
-            </button>
+              Don&apos;t have an account? Start free trial
+            </a>
           </div>
         </div>
 
