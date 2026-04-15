@@ -6,7 +6,7 @@ import { Resend } from 'resend'
 import { renderSubscriptionConfirmedEmail } from '@/emails/follow-ups'
 
 export async function POST(req: NextRequest) {
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!,
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
                             
   const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
