@@ -197,48 +197,44 @@ function clampInclusion(value: number): number {
 }
 
 // ── RADAR CHART ──────────────────────────────────────────
-function RadarChart({ nutrients, findReq, mpBalance, mpDemand, isRuminant }: { 
-  nutrients: {s:string,l:string,v:number,u:string}[], 
-  findReq: (s:string)=>Req|undefined,
-  mpBalance: number,
-  mpDemand: number,
-  isRuminant: boolean 
+function RadarChart({ cp, me, ndf, ee, ca, p, findReq }: { 
+  cp: number, me: number, ndf: number, ee: number, ca: number, p: number,
+  findReq: (s:string)=>Req|undefined
 }) {
-  const points: { label: string; actual: number; min: number; max: number }[] = []
-  nutrients.forEach(nt => {
-    const req = findReq(nt.s)
-    if (!req || req.min == null || req.max == null) return
-    const mid = (req.min + req.max) / 2
-    if (mid <= 0) return
-    points.push({ label: nt.l, actual: nt.v / mid, min: req.min / mid, max: req.max / mid })
+  const axes = [
+    { label: 'CP', value: cp, short: 'cp' },
+    { label: 'ME', value: me, short: 'me' },
+    { label: 'NDF', value: ndf, short: 'ndf' },
+    { label: 'EE', value: ee, short: 'ee' },
+    { label: 'Ca', value: ca, short: 'ca' },
+    { label: 'P', value: p, short: 'p' },
+  ]
+  const points = axes.map(ax => {
+    const req = findReq(ax.short)
+    const mid = req?.min != null && req?.max != null ? (req.min + req.max) / 2 : ax.value
+    return { label: ax.label, actual: mid > 0 ? ax.value / mid : 0, min: req?.min != null ? req.min / mid : 0.8, max: req?.max != null ? req.max / mid : 1.2 }
   })
-  if (isRuminant && mpDemand > 0) {
-    const mpSupply = mpBalance + mpDemand
-    points.push({ label: 'MP', actual: mpSupply / mpDemand, min: 0.95, max: 1.30 })
-  }
-  if (points.length < 3) return null
-  const cx = 130, cy = 130, r = 95, n = points.length
+  const cx = 130, cy = 130, r = 90, n = points.length
   const angleStep = (2 * Math.PI) / n, startAngle = -Math.PI / 2
   const toXY = (frac: number, i: number) => {
     const f = Math.min(Math.max(frac, 0), 1.6), a = startAngle + i * angleStep
     return { x: cx + r * f * Math.cos(a), y: cy + r * f * Math.sin(a) }
   }
   const makePath = (fn: (p: typeof points[0]) => number) =>
-    points.map((p, i) => { const { x, y } = toXY(fn(p), i); return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}` }).join(' ') + ' Z'
-  const actualPath = makePath(p => p.actual), minPath = makePath(p => p.min), maxPath = makePath(p => p.max)
+    points.map((pt, i) => { const { x, y } = toXY(fn(pt), i); return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}` }).join(' ') + ' Z'
   return (
-    <svg viewBox="0 0 260 260" className="w-full max-w-[220px] mx-auto my-1">
+    <svg viewBox="0 0 260 260" className="w-full max-w-[200px] mx-auto my-1">
       {[0.5, 1.0, 1.5].map(ring => (
-        <polygon key={ring} points={Array.from({ length: n }, (_, i) => { const { x, y } = toXY(ring, i); return `${x.toFixed(1)},${y.toFixed(1)}` }).join(' ')} fill="none" stroke="var(--color-border, #3a332d)" strokeWidth="0.5" opacity="0.5" />
+        <polygon key={ring} points={Array.from({ length: n }, (_, i) => { const { x, y } = toXY(ring, i); return `${x.toFixed(1)},${y.toFixed(1)}` }).join(' ')} fill="none" stroke="var(--color-border, #3a332d)" strokeWidth="0.5" opacity="0.4" />
       ))}
-      {points.map((_, i) => { const { x, y } = toXY(1.5, i); return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="var(--color-border, #3a332d)" strokeWidth="0.5" opacity="0.3" /> })}
-      <path d={maxPath} fill="rgba(76,175,125,0.08)" stroke="none" />
-      <path d={minPath} fill="var(--color-surface-bg, #1a1612)" stroke="none" />
-      <path d={minPath} fill="none" stroke="#4CAF7D" strokeWidth="1" strokeDasharray="4,3" opacity="0.6" />
-      <path d={maxPath} fill="none" stroke="#4CAF7D" strokeWidth="1" strokeDasharray="4,3" opacity="0.6" />
-      <path d={actualPath} fill="rgba(207,134,60,0.12)" stroke="#CF863C" strokeWidth="2" />
-      {points.map((p, i) => { const { x, y } = toXY(p.actual, i); const c = p.actual >= p.min && p.actual <= p.max ? '#4CAF7D' : p.actual < p.min ? '#D4A843' : '#E24B4A'; return <circle key={i} cx={x} cy={y} r="3" fill={c} stroke="var(--color-surface-bg, #1a1612)" strokeWidth="1.5" /> })}
-      {points.map((p, i) => { const { x, y } = toXY(1.72, i); const c = p.actual >= p.min && p.actual <= p.max ? 'var(--color-text-muted, #a89882)' : p.actual < p.min ? '#D4A843' : '#E24B4A'; return <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill={c} fontSize="9" fontWeight="600" fontFamily="monospace">{p.label}</text> })}
+      {points.map((_, i) => { const { x, y } = toXY(1.5, i); return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="var(--color-border, #3a332d)" strokeWidth="0.5" opacity="0.25" /> })}
+      <path d={makePath(pt => pt.max)} fill="rgba(76,175,125,0.07)" stroke="none" />
+      <path d={makePath(pt => pt.min)} fill="var(--color-surface-bg, #1a1612)" stroke="none" />
+      <path d={makePath(pt => pt.min)} fill="none" stroke="#4CAF7D" strokeWidth="1" strokeDasharray="4,3" opacity="0.5" />
+      <path d={makePath(pt => pt.max)} fill="none" stroke="#4CAF7D" strokeWidth="1" strokeDasharray="4,3" opacity="0.5" />
+      <path d={makePath(pt => pt.actual)} fill="rgba(207,134,60,0.15)" stroke="#CF863C" strokeWidth="2" />
+      {points.map((pt, i) => { const { x, y } = toXY(pt.actual, i); const c = pt.actual >= pt.min && pt.actual <= pt.max ? '#4CAF7D' : pt.actual < pt.min ? '#D4A843' : '#E24B4A'; return <circle key={i} cx={x} cy={y} r="3.5" fill={c} stroke="var(--color-surface-bg, #1a1612)" strokeWidth="1.5" /> })}
+      {points.map((pt, i) => { const { x, y } = toXY(1.78, i); const c = pt.actual >= pt.min && pt.actual <= pt.max ? 'var(--color-text-muted, #a89882)' : pt.actual < pt.min ? '#D4A843' : '#E24B4A'; return <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill={c} fontSize="10" fontWeight="700" fontFamily="monospace">{pt.label}</text> })}
     </svg>
   )
 }
@@ -606,7 +602,7 @@ export default function FormulaBuilderPage() {
 
           {/* BALANCE */}
           {rightTab==='balance'&&<div className="card p-2.5 flex-1 overflow-auto">
-            <RadarChart nutrients={balanceNuts} findReq={findReq} mpBalance={mpBalance} mpDemand={mpDemand} isRuminant={isRuminant} />
+            <RadarChart cp={cp} me={me} ndf={ndf} ee={ee} ca={ca} p={pp} findReq={findReq} />
             <div className="grid grid-cols-3 gap-1.5 mb-2">{[{l:'Met',v:metC,c:'text-brand'},{l:'Warn',v:warnC,c:'text-status-amber'},{l:'Crit',v:failC,c:'text-status-red'}].map((x,i)=>(<div key={i} className="bg-surface-deep rounded-lg p-1.5 text-center"><div className={`text-lg font-bold font-mono ${x.c}`}>{x.v}</div><div className="text-[9px] text-text-ghost">{x.l}</div></div>))}</div>
             {balanceNuts.map(nt=>{const req=findReq(nt.s);if(!req)return(<div key={nt.s} className="flex items-center gap-2 py-0.5"><span className="w-10 text-[10px] font-semibold text-text-muted font-mono text-right">{nt.l}</span><div className="flex-1 h-1 bg-surface-deep rounded-sm"/><span className="w-14 text-[10px] font-mono text-text text-right">{nt.v<0.1?nt.v.toFixed(3):nt.v.toFixed(2)}{nt.u}</span></div>)
               const inR=(req.min!=null&&req.max!=null)?nt.v>=req.min&&nt.v<=req.max:(req.min!=null?nt.v>=req.min:true)&&(req.max!=null?nt.v<=req.max:true);const crit=(req.critical_max!=null&&nt.v>req.critical_max)||(req.critical_min!=null&&nt.v<req.critical_min)
