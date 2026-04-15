@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy, Bookmark, BookmarkCheck } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy, Bookmark, BookmarkCheck, AlertTriangle, Check } from 'lucide-react'
 
 const SPECIES_OPTIONS = [
   { value: 'cattle', label: 'Dairy Cattle', short: 'Dairy' },
@@ -100,6 +100,7 @@ function getStageLabel(species: string, stage: string): string {
 
 export default function FormulasPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [formulas, setFormulas] = useState<any[]>([])
   const [clients, setClients] = useState<any[]>([])
   const [animalGroups, setAnimalGroups] = useState<any[]>([])
@@ -118,8 +119,34 @@ export default function FormulasPage() {
   const [newTemplateId, setNewTemplateId] = useState('')
 
   useEffect(() => { loadData() }, [])
+
+  // Auto-open create modal if coming from client page with params
+  useEffect(() => {
+    if (searchParams.get('create') === 'true') {
+      const agId = searchParams.get('animal_group') || ''
+      const clientId = searchParams.get('client') || ''
+      if (clientId) setNewClientId(clientId)
+      if (agId) setNewAnimalGroupId(agId)
+      setShowCreate(true)
+      // Clean URL
+      router.replace('/formulas', { scroll: false })
+    }
+  }, [searchParams])
+
   useEffect(() => { setNewStage(''); setNewBreed(''); setNewAnimalGroupId('') }, [newSpecies])
   useEffect(() => { if (newClientId) loadAnimalGroups(newClientId); else setAnimalGroups([]) }, [newClientId])
+
+  // Auto-fill species/stage/breed when animal group is selected
+  useEffect(() => {
+    if (newAnimalGroupId) {
+      const ag = animalGroups.find(a => a.id === newAnimalGroupId)
+      if (ag) {
+        setNewSpecies(ag.species)
+        setNewStage(ag.production_stage)
+        setNewBreed(ag.breed || '')
+      }
+    }
+  }, [newAnimalGroupId, animalGroups])
 
   async function getSupabase() { const { createClient } = await import('@/lib/supabase/client'); return createClient() }
 
@@ -135,11 +162,12 @@ export default function FormulasPage() {
 
   async function loadAnimalGroups(clientId: string) {
     const supabase = await getSupabase()
-    const { data } = await supabase.from('client_animals').select('*').eq('client_id', clientId).order('name')
+    const { data } = await supabase.from('client_animals')
+      .select('*, requirement_profile:animal_requirements(id, stage_name, requirements)')
+      .eq('client_id', clientId).order('name')
     setAnimalGroups(data || [])
   }
 
-  // Species counts for filter badges
   const speciesCounts: Record<string, number> = {}
   formulas.forEach(f => { speciesCounts[f.species] = (speciesCounts[f.species] || 0) + 1 })
   const activeSpecies = SPECIES_OPTIONS.filter(sp => speciesCounts[sp.value] > 0)
@@ -151,8 +179,18 @@ export default function FormulasPage() {
     return matchSearch && matchStatus && matchSpecies
   })
 
+  // Split animal groups by profile status
+  const groupsWithProfile = animalGroups.filter(ag => ag.requirement_profile)
+  const groupsWithoutProfile = animalGroups.filter(ag => !ag.requirement_profile)
+  const filteredGroupsWithProfile = groupsWithProfile.filter(ag => ag.species === newSpecies || !newAnimalGroupId)
+  const selectedGroup = animalGroups.find(a => a.id === newAnimalGroupId)
+  const selectedProfile = selectedGroup?.requirement_profile
+
   async function handleCreate() {
     if (!newName.trim() || !newStage) return
+    // Gate: if client is selected, animal group with profile is required
+    if (newClientId && !newAnimalGroupId) return
+    if (newClientId && newAnimalGroupId && !selectedProfile) return
     setLoading(true)
     const supabase = await getSupabase()
     const { data: { user } } = await supabase.auth.getUser()
@@ -193,7 +231,7 @@ export default function FormulasPage() {
     const { data } = await supabase.from('formulas').insert({
       nutritionist_id: user.id, name: orig.name + ' (copy)', client_id: orig.client_id,
       species: orig.species, production_stage: orig.production_stage, breed: orig.breed,
-      batch_size_kg: orig.batch_size_kg, status: 'draft', version: 1,
+      animal_group_id: orig.animal_group_id, batch_size_kg: orig.batch_size_kg, status: 'draft', version: 1,
     }).select('*, client:nutrition_clients(id, name)').single()
     if (data) {
       const { data: origIngs } = await supabase.from('formula_ingredients').select('ingredient_id, inclusion_pct, locked').eq('formula_id', id)
@@ -219,9 +257,11 @@ export default function FormulasPage() {
   const stageOptions = STAGES[newSpecies] || []
   const stageGroups = Array.from(new Set(stageOptions.map(s => s.group)))
   const breedOptions = BREEDS[newSpecies] || []
-  const filteredAnimalGroups = animalGroups.filter(ag => ag.species === newSpecies)
   const sameSpeciesTemplates = formulas.filter(f => f.is_template && f.species === newSpecies)
   const otherSpeciesTemplates = formulas.filter(f => f.is_template && f.species !== newSpecies)
+
+  // Determine if animal group controls species/stage (locks manual selectors)
+  const agControlled = !!newAnimalGroupId && !!selectedGroup
 
   return (
     <div className="p-7 max-w-[1200px]">
@@ -230,7 +270,6 @@ export default function FormulasPage() {
         <button onClick={() => { setNewName(''); setNewSpecies('cattle'); setNewStage(''); setNewBreed(''); setNewClientId(''); setNewAnimalGroupId(''); setNewBatch('1000'); setNewTemplateId(''); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
       </div>
 
-      {/* Search + Status filters */}
       <div className="flex gap-2.5 mb-2 items-center">
         <div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-ghost" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search formulas..." className="input pl-9" /></div>
         <div className="flex gap-1">
@@ -239,7 +278,6 @@ export default function FormulasPage() {
         </div>
       </div>
 
-      {/* Species filters */}
       {activeSpecies.length > 1 && (
         <div className="flex gap-1.5 mb-4">
           <button onClick={() => setSpeciesFilter(null)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all border cursor-pointer ${!speciesFilter ? 'border-brand bg-brand/10 text-brand' : 'border-border text-text-ghost hover:border-border-light bg-transparent'}`}>
@@ -247,7 +285,7 @@ export default function FormulasPage() {
           </button>
           {activeSpecies.map(sp => (
             <button key={sp.value} onClick={() => setSpeciesFilter(speciesFilter === sp.value ? null : sp.value)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all border cursor-pointer flex items-center gap-1.5 ${speciesFilter === sp.value ? 'border-brand bg-brand/10 text-brand' : 'border-border text-text-ghost hover:border-border-light bg-transparent'}`}>
-              <span className={`w-2 h-2 rounded-full ${sp.value === 'cattle' ? 'bg-[#2E6B42]' : sp.value === 'beef' ? 'bg-[#1E4A5A]' : sp.value === 'pig' ? 'bg-[#BE5529]' : sp.value === 'poultry' ? 'bg-[#C9A043]' : 'bg-[#C9A043]'}`} />
+              <span className={`w-2 h-2 rounded-full ${sp.value === 'cattle' ? 'bg-[#2E6B42]' : sp.value === 'beef' ? 'bg-[#1E4A5A]' : sp.value === 'pig' ? 'bg-[#BE5529]' : 'bg-[#C9A043]'}`} />
               {sp.short} <span className="font-mono opacity-60">{speciesCounts[sp.value]}</span>
             </button>
           ))}
@@ -295,6 +333,8 @@ export default function FormulasPage() {
           <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5"><h2 className="text-xl font-bold text-text">New Formula</h2><button onClick={() => setShowCreate(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button></div>
             <div className="flex flex-col gap-3.5">
+
+              {/* Template selector */}
               {(sameSpeciesTemplates.length > 0 || otherSpeciesTemplates.length > 0) && (
                 <div className="p-3 rounded-lg border border-status-amber/20 bg-status-amber/5">
                   <label className="text-xs font-semibold text-status-amber block mb-1.5">{'\u2B50'} Start from template</label>
@@ -318,47 +358,119 @@ export default function FormulasPage() {
                   <p className="text-2xs text-text-ghost mt-1">Copies all ingredients and inclusion rates into the new formula.</p>
                 </div>
               )}
+
+              {/* Formula name */}
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Formula Name *</label><input value={newName} onChange={e => setNewName(e.target.value)} className="input" placeholder="e.g. Early Lact — High Production 28L" /></div>
-              <div><label className="text-xs font-semibold text-text-muted block mb-1">Client</label>
-                <select value={newClientId} onChange={e => setNewClientId(e.target.value)} className="input">
-                  <option value="">No client (template)</option>
+
+              {/* Client selector */}
+              <div><label className="text-xs font-semibold text-text-muted block mb-1">Client *</label>
+                <select value={newClientId} onChange={e => { setNewClientId(e.target.value); setNewAnimalGroupId('') }} className="input">
+                  <option value="">Select client...</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
+
+              {/* Animal Group selector — MANDATORY when client is selected */}
+              {newClientId && (
+                <div>
+                  <label className="text-xs font-semibold text-text-muted block mb-1">Animal Group *</label>
+                  <select value={newAnimalGroupId} onChange={e => setNewAnimalGroupId(e.target.value)} className="input">
+                    <option value="">Select animal group...</option>
+                    {groupsWithProfile.length > 0 && (
+                      <optgroup label="Ready to formulate">
+                        {groupsWithProfile.map(ag => (
+                          <option key={ag.id} value={ag.id}>
+                            {ag.name} — {ag.breed || ag.species} ({ag.count} head{ag.avg_weight_kg ? ', ' + ag.avg_weight_kg + 'kg' : ''})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {groupsWithoutProfile.length > 0 && (
+                      <optgroup label="⚠ No profile — assign in Client page first">
+                        {groupsWithoutProfile.map(ag => (
+                          <option key={ag.id} value="" disabled>
+                            ⚠ {ag.name} — no requirement profile
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+
+                  {/* Profile preview */}
+                  {selectedProfile && (
+                    <div className="mt-2 px-3 py-2 rounded-lg bg-brand/5 border border-brand/20">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Check size={12} className="text-brand" />
+                        <span className="text-[10px] font-bold text-brand">Profile: {selectedProfile.stage_name}</span>
+                      </div>
+                      <div className="text-[10px] font-mono text-text-muted">
+                        {(() => {
+                          const reqs = selectedProfile.requirements || []
+                          const cpReq = reqs.find((r:any) => r.nutrient?.toLowerCase().includes('protein'))
+                          const meReq = reqs.find((r:any) => r.nutrient?.toLowerCase().includes('energy'))
+                          const ndfReq = reqs.find((r:any) => r.nutrient?.toLowerCase().includes('ndf'))
+                          return `${cpReq ? `CP ${cpReq.min}–${cpReq.max}%` : ''} ${meReq ? `· ME ${meReq.min}–${meReq.max} MJ` : ''} ${ndfReq ? `· NDF ${ndfReq.min}–${ndfReq.max}%` : ''} · ${reqs.length} nutrient targets`
+                        })()}
+                      </div>
+                      {selectedGroup && (
+                        <div className="text-[10px] text-text-ghost mt-1">
+                          {selectedGroup.breed || selectedGroup.species} · {selectedGroup.avg_weight_kg ? selectedGroup.avg_weight_kg + 'kg' : ''} {selectedGroup.milk_yield ? '· ' + selectedGroup.milk_yield + ' L/d' : ''} {selectedGroup.target_adg ? '· ADG ' + selectedGroup.target_adg + ' kg/d' : ''}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* No groups available */}
+                  {animalGroups.length === 0 && (
+                    <p className="text-2xs text-status-amber mt-1.5 flex items-center gap-1">
+                      <AlertTriangle size={10} /> No animal groups for this client. Create one in the Client page first.
+                    </p>
+                  )}
+
+                  {/* All groups lack profiles */}
+                  {animalGroups.length > 0 && groupsWithProfile.length === 0 && (
+                    <p className="text-2xs text-status-amber mt-1.5 flex items-center gap-1">
+                      <AlertTriangle size={10} /> All animal groups need a requirement profile. Assign profiles in the Client page.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Species / Stage / Breed — auto-filled from animal group, or manual if no client */}
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs font-semibold text-text-muted block mb-1">Species *</label>
-                  <select value={newSpecies} onChange={e => setNewSpecies(e.target.value)} className="input">
+                <div>
+                  <label className="text-xs font-semibold text-text-muted block mb-1">Species {agControlled ? '' : '*'}</label>
+                  <select value={newSpecies} onChange={e => setNewSpecies(e.target.value)} className="input" disabled={agControlled}>
                     {SPECIES_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
+                  {agControlled && <p className="text-[9px] text-text-ghost mt-0.5">Set by animal group</p>}
                 </div>
-                <div><label className="text-xs font-semibold text-text-muted block mb-1">Production Stage *</label>
-                  <select value={newStage} onChange={e => setNewStage(e.target.value)} className="input">
+                <div>
+                  <label className="text-xs font-semibold text-text-muted block mb-1">Production Stage {agControlled ? '' : '*'}</label>
+                  <select value={newStage} onChange={e => setNewStage(e.target.value)} className="input" disabled={agControlled}>
                     <option value="">Select stage...</option>
                     {stageGroups.map(g => (<optgroup key={g} label={g}>{stageOptions.filter(s => s.group === g).map(s => (<option key={s.value} value={s.value}>{s.label}</option>))}</optgroup>))}
                   </select>
                 </div>
               </div>
-              <div><label className="text-xs font-semibold text-text-muted block mb-1">Breed *</label>
-                <select value={newBreed} onChange={e => setNewBreed(e.target.value)} className="input">
+
+              <div>
+                <label className="text-xs font-semibold text-text-muted block mb-1">Breed</label>
+                <select value={newBreed} onChange={e => setNewBreed(e.target.value)} className="input" disabled={agControlled}>
                   <option value="">Select breed...</option>
                   {breedOptions.map(b => <option key={b} value={b}>{b}</option>)}
                 </select>
-                <p className="text-2xs text-text-ghost mt-1">Breed determines specific nutritional requirements.</p>
               </div>
-              {newClientId && filteredAnimalGroups.length > 0 && (
-                <div>
-                  <label className="text-xs font-semibold text-text-muted block mb-1">Link to Animal Group <span className="text-text-ghost font-normal">(optional)</span></label>
-                  <select value={newAnimalGroupId} onChange={e => setNewAnimalGroupId(e.target.value)} className="input">
-                    <option value="">No specific group</option>
-                    {filteredAnimalGroups.map(ag => (<option key={ag.id} value={ag.id}>{ag.name} — {ag.breed || ag.species} ({ag.count} head{ag.avg_weight_kg ? ', ' + ag.avg_weight_kg + 'kg' : ''})</option>))}
-                  </select>
-                  <p className="text-2xs text-text-ghost mt-1">Pre-fills production data from the animal group.</p>
-                </div>
-              )}
+
               <div><label className="text-xs font-semibold text-text-muted block mb-1">Batch Size (kg)</label><input type="number" value={newBatch} onChange={e => setNewBatch(e.target.value)} className="input" min="100" step="100" /></div>
+
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setShowCreate(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
-                <button onClick={handleCreate} disabled={loading || !newName.trim() || !newStage} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{loading ? 'Creating...' : newTemplateId ? 'Create from Template' : 'Create Formula'}</button>
+                <button onClick={handleCreate}
+                  disabled={loading || !newName.trim() || !newStage || (newClientId && !newAnimalGroupId) || (newClientId && newAnimalGroupId && !selectedProfile)}
+                  className="btn btn-primary flex-1 justify-center disabled:opacity-50">
+                  {loading ? 'Creating...' : newTemplateId ? 'Create from Template' : 'Create Formula'}
+                </button>
               </div>
             </div>
           </div>
