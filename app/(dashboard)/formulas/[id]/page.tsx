@@ -184,8 +184,9 @@ function validateFormula(ings: any[], safetyRules: any[], requirements: Req[], b
     safetyRules.forEach(rule => {
       if (!rule.ingredient_name) return
       if (name.toLowerCase().includes(rule.ingredient_name.toLowerCase()) || rule.ingredient_name.toLowerCase().includes(name.toLowerCase().split(' ')[0])) {
-        if (rule.severity === 'danger' && pct > 0) {
-          warnings.push({ type: 'warning', message: `⚠ ${rule.title}: ${name} — ${rule.description?.substring(0, 100)}`, ingredient: name })
+        if (pct > 0) {
+        const wType = rule.severity === 'danger' ? 'error' : rule.severity === 'warning' ? 'warning' : 'info'
+        warnings.push({ type: wType, message: `⚠ ${rule.title}: ${name} — ${rule.description?.substring(0, 100)}`, ingredient: name })
         }
       }
     })
