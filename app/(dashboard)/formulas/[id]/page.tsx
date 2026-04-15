@@ -285,7 +285,7 @@ export default function FormulaBuilderPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [production, setProduction] = useState<Record<string,string>>({})
-  const [showProduction, setShowProduction] = useState(false)
+  const [showProduction, setShowProduction] = useState(true)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiReview, setAiReview] = useState<string|null>(null)
   const [showAi, setShowAi] = useState(false)
