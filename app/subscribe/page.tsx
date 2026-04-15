@@ -1,12 +1,7 @@
 // app/subscribe/page.tsx
-// ============================================
-// OPTIA FEED — Subscribe Page
-// Shown when 24hr trial expires
-// ============================================
-
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 const PLANS = [
@@ -62,7 +57,7 @@ const PLANS = [
   },
 ];
 
-export default function SubscribePage() {
+function SubscribeContent() {
   const [loading, setLoading] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const cancelled = searchParams?.get('cancelled');
@@ -270,5 +265,13 @@ export default function SubscribePage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SubscribePage() {
+  return (
+    <Suspense>
+      <SubscribeContent />
+    </Suspense>
   );
 }
