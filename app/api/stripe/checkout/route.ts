@@ -92,6 +92,7 @@ export async function POST(req: NextRequest) {
       allow_promotion_codes: true,
       billing_address_collection: 'auto',
       tax_id_collection: { enabled: true },
+      customer_update: { name: 'auto' },
     })
 
     return NextResponse.json({ url: checkoutSession.url })
