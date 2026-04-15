@@ -88,9 +88,7 @@ function runOptimizer(ings: any[], prices: Record<string,number>, constraints: O
   function calcSolCost(sol: number[]): number { const totalAF = sol.reduce((s, pct, i) => s + pct / 100 * 1000 / ((ings[i].ingredient?.dm_pct || 88) / 100), 0); return sol.reduce((s, pct, i) => { const afKg = pct / 100 * 1000 / ((ings[i].ingredient?.dm_pct || 88) / 100); return s + (prices[ings[i].ingredient_id] || 0) * (totalAF > 0 ? afKg / totalAF : 0) }, 0) }
   function isFeasible(sol: number[]): boolean { const total = sol.reduce((s, v) => s + v, 0); if (total < 99.5 || total > 100.5) return false; for (const c of constraints) { if (!c.enabled) continue; const v = calcNutSol(sol, c.key); if (v < c.min || v > c.max) return false }; for (const ic of ingConstraints) { if (sol[ic.idx] < ic.min || sol[ic.idx] > ic.max) return false }; return true }
   let best = [...current]; let bestCost = isFeasible(best) ? calcSolCost(best) : Infinity
-  // Phase 1: Coordinate descent
   for (let pass = 0; pass < 5; pass++) { let improved = false; for (let i = 0; i < n; i++) { if (ings[i].locked) continue; for (let j = 0; j < n; j++) { if (i === j || ings[j].locked) continue; let lo = 0, hi = Math.min(best[i], 60); for (let bs = 0; bs < 20; bs++) { const mid = (lo + hi) / 2; const candidate = [...best]; candidate[i] = Math.max(0, best[i] - mid); candidate[j] = Math.min(100, best[j] + mid); if (isFeasible(candidate) && calcSolCost(candidate) < bestCost) { lo = mid } else { hi = mid } } if (lo > 0.05) { const f2 = [...best]; f2[i] = Math.max(0, best[i] - lo); f2[j] = Math.min(100, best[j] + lo); if (isFeasible(f2)) { const nc = calcSolCost(f2); if (nc < bestCost - 0.01) { best = f2; bestCost = nc; improved = true } } } } } if (!improved) break }
-  // Phase 2: Random perturbations
   for (let iter = 0; iter < iterations; iter++) { const candidate = [...best]; const step = 0.1 + Math.random() * 0.5; const i = Math.floor(Math.random() * n); const j = Math.floor(Math.random() * n); if (i === j || ings[i].locked || ings[j].locked) continue; candidate[i] = Math.max(0, candidate[i] - step); candidate[j] = Math.max(0, candidate[j] + step); if (isFeasible(candidate)) { const cost = calcSolCost(candidate); if (cost < bestCost) { best = candidate; bestCost = cost } } }
   return { solution: best.map(v => Math.round(v * 10) / 10), cost: bestCost, feasible: bestCost < Infinity, improved: bestCost < originalCost - 0.5 }
 }
@@ -118,7 +116,6 @@ function defaultOptConstraints(mode: SpeciesMode, stage?: string): OptConstraint
     { key: 'ca_pct', label: 'Ca (%)', enabled: false, min: 0.70, max: 1.10 },
     { key: 'linoleic_pct', label: 'Linoleic (%)', enabled: false, min: 1.0, max: 3.0 },
   ]
-  // ── Ruminant: stage-specific constraints ──
   const s = stage || ''
   const isEarlyLact = s.includes('early')
   const isMidLact = s.includes('mid')
@@ -127,7 +124,6 @@ function defaultOptConstraints(mode: SpeciesMode, stage?: string): OptConstraint
   const isDryClose = s.includes('dry') && s.includes('close')
   const isFinisher = s.includes('finisher')
   const isGrower = s.includes('grower')
-  const isBeef = isFinisher || isGrower
 
   let me_min = 10.5, me_max = 13.5
   let cp_min = 14, cp_max = 20
@@ -158,29 +154,17 @@ interface Warning { type: 'error'|'warning'|'info'; message: string; ingredient?
 
 function validateFormula(ings: any[], safetyRules: any[], requirements: Req[], balanceNuts: {s:string,l:string,v:number,u:string}[], findReq: (s:string)=>Req|undefined, totalPctDM: number, speciesMode: SpeciesMode): Warning[] {
   const warnings: Warning[] = []
-
-  // Total must be ~100%
   if (ings.length > 0 && totalPctDM < 99.5) warnings.push({ type: 'error', message: `Total inclusion is ${totalPctDM.toFixed(1)}% — must be ~100% DM` })
   if (totalPctDM > 100.5) warnings.push({ type: 'error', message: `Total inclusion is ${totalPctDM.toFixed(1)}% — exceeds 100% DM` })
-
-  // Per-ingredient checks
   ings.forEach(fi => {
     if (!fi.ingredient) return
     const pct = fi.inclusion_pct || 0
     const name = fi.ingredient.name
-
-    // Negative or zero (if added but 0)
     if (pct < 0) warnings.push({ type: 'error', message: `${name} has negative inclusion (${pct}%)`, ingredient: name })
-
-    // Very high single ingredient
     if (pct > 70) warnings.push({ type: 'warning', message: `${name} at ${pct.toFixed(1)}% is very high — check if intentional`, ingredient: name })
-
-    // Max inclusion from ingredient DB
     if (fi.ingredient.max_inclusion_pct && pct > fi.ingredient.max_inclusion_pct) {
       warnings.push({ type: 'warning', message: `${name} at ${pct.toFixed(1)}% exceeds max ${fi.ingredient.max_inclusion_pct}%`, ingredient: name })
     }
-
-    // Match against safety rules
     safetyRules.forEach(rule => {
       if (!rule.ingredient_name) return
       if (name.toLowerCase().includes(rule.ingredient_name.toLowerCase()) || rule.ingredient_name.toLowerCase().includes(name.toLowerCase().split(' ')[0])) {
@@ -191,8 +175,6 @@ function validateFormula(ings: any[], safetyRules: any[], requirements: Req[], b
       }
     })
   })
-
-  // Nutrient range violations
   balanceNuts.forEach(nt => {
     const req = findReq(nt.s)
     if (!req) return
@@ -201,22 +183,17 @@ function validateFormula(ings: any[], safetyRules: any[], requirements: Req[], b
     if (req.min != null && nt.v < req.min && nt.v > 0) warnings.push({ type: 'warning', message: `${nt.l} at ${nt.v.toFixed(2)}${nt.u} is below target range (${req.min}–${req.max})` })
     if (req.max != null && nt.v > req.max) warnings.push({ type: 'warning', message: `${nt.l} at ${nt.v.toFixed(2)}${nt.u} exceeds target range (${req.min}–${req.max})` })
   })
-
-  // Ruminant-specific
   if (speciesMode === 'ruminant') {
     const ndfVal = ings.reduce((s, fi) => s + (fi.ingredient?.ndf_pct||0)*(fi.inclusion_pct||0)/100, 0)
     if (ndfVal > 0 && ndfVal < 25) warnings.push({ type: 'warning', message: `NDF at ${ndfVal.toFixed(1)}% is low — risk of subacute acidosis` })
     const forPct = ings.reduce((s,fi)=>fi.ingredient?.particle_class==='forage'?s+(fi.inclusion_pct||0):s,0)
     if (forPct > 0 && forPct < 25 && totalPctDM > 50) warnings.push({ type: 'warning', message: `Forage at ${forPct.toFixed(0)}% is low — minimum 30% recommended for rumen health` })
   }
-
-  // Pig-specific
   if (speciesMode === 'pig') {
     const caVal = ings.reduce((s, fi) => s + (fi.ingredient?.ca_pct||0)*(fi.inclusion_pct||0)/100, 0)
     const sttdP = ings.reduce((s, fi) => s + (fi.ingredient?.sttd_p_pct||0)*(fi.inclusion_pct||0)/100, 0)
     if (sttdP > 0 && caVal / sttdP > 3.5) warnings.push({ type: 'warning', message: `Ca:STTD P ratio is ${(caVal/sttdP).toFixed(1)}:1 — exceeds 3.5:1 max (reduces P absorption)` })
   }
-
   return warnings
 }
 
@@ -299,13 +276,14 @@ export default function FormulaBuilderPage() {
   const [optConstraints, setOptConstraints] = useState<OptConstraint[]>([])
   const [showCompare, setShowCompare] = useState(false)
   const [compareSlots, setCompareSlots] = useState<(CompareSlot|null)[]>([null, null, null, null])
+  // ── CHANGE 3.1: Track where requirements came from ──
+  const [profileSource, setProfileSource] = useState<'linked'|'legacy'|'none'>('none')
 
-  // ── SPECIES MODE ──────────────────────────────────────
   const speciesMode: SpeciesMode = formula ? getSpeciesMode(formula.species) : 'ruminant'
   const isRuminant = speciesMode === 'ruminant'
   const isPig = speciesMode === 'pig'
   const isPoultry = speciesMode === 'poultry'
-  const isMono = isPig || isPoultry // monogastric
+  const isMono = isPig || isPoultry
 
   useEffect(() => { loadFormula() }, [params.id])
   useEffect(() => { if (formula) setOptConstraints(defaultOptConstraints(getSpeciesMode(formula.species), formula.production_stage)) }, [formula?.species, formula?.production_stage])
@@ -331,14 +309,72 @@ export default function FormulaBuilderPage() {
     }
     const { data: fi } = await supabase.from('formula_ingredients').select('*, ingredient:ingredients(*)').eq('formula_id', params.id)
     setIngs(fi || [])
-    // Load ALL ingredients but filter will happen at display time based on species_suitable
     const { data: allIng } = await supabase.from('ingredients').select('*').or(`nutritionist_id.is.null${user?',nutritionist_id.eq.'+user.id:''}`).order('name')
     setAllIngredients(allIng || [])
+
+    // ═══════════════════════════════════════════════════════
+    // CHANGE 3.1: Load requirements from linked profile
+    // Priority 1: animal_group → requirement_profile_id (assigned profile)
+    // Priority 2: nutritionist's custom profile for species+stage
+    // Priority 3: legacy search by species + stage + breed (system defaults)
+    // ═══════════════════════════════════════════════════════
     let req = null
-    if (f.breed) { const { data: breedReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).eq('breed', f.breed).is('nutritionist_id', null).limit(1).single(); req = breedReq }
-    if (!req) { const { data: genericReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).is('nutritionist_id', null).is('breed', null).limit(1).single(); req = genericReq }
-    if (!req) { const { data: anyReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).is('nutritionist_id', null).limit(1).single(); req = anyReq }
+    let reqSource: 'linked'|'legacy'|'none' = 'none'
+
+    // Priority 1: Load from linked animal group's assigned profile
+    if (f.animal_group_id) {
+      const { data: ag } = await supabase
+        .from('client_animals')
+        .select('requirement_profile_id')
+        .eq('id', f.animal_group_id)
+        .single()
+      if (ag?.requirement_profile_id) {
+        const { data: profileReq } = await supabase
+          .from('animal_requirements')
+          .select('*')
+          .eq('id', ag.requirement_profile_id)
+          .single()
+        if (profileReq) {
+          req = profileReq
+          reqSource = 'linked'
+        }
+      }
+    }
+
+    // Priority 2: Nutritionist's custom profile for this species+stage
+    if (!req && user) {
+      const { data: customReq } = await supabase
+        .from('animal_requirements')
+        .select('*')
+        .eq('species', f.species)
+        .eq('production_stage', f.production_stage)
+        .eq('nutritionist_id', user.id)
+        .limit(1)
+        .single()
+      if (customReq) {
+        req = customReq
+        reqSource = 'linked'
+      }
+    }
+
+    // Priority 3 (fallback): Legacy search by species + stage + breed (system defaults)
+    if (!req && f.breed) {
+      const { data: breedReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).eq('breed', f.breed).is('nutritionist_id', null).limit(1).single()
+      if (breedReq) { req = breedReq; reqSource = 'legacy' }
+    }
+    if (!req) {
+      const { data: genericReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).is('nutritionist_id', null).is('breed', null).limit(1).single()
+      if (genericReq) { req = genericReq; reqSource = 'legacy' }
+    }
+    if (!req) {
+      const { data: anyReq } = await supabase.from('animal_requirements').select('*').eq('species', f.species).eq('production_stage', f.production_stage).is('nutritionist_id', null).limit(1).single()
+      if (anyReq) { req = anyReq; reqSource = 'legacy' }
+    }
+
     if (req) { setRequirements(req.requirements||[]); setRatios(req.ratios||[]); setStageName(req.stage_name||f.production_stage) }
+    setProfileSource(reqSource)
+    // ═══════════════════════════════════════════════════════
+
     const { data: rules } = await supabase.from('safety_rules').select('*').eq('species', f.species).is('nutritionist_id', null).eq('active', true)
     setSafetyRules(rules || [])
     if (user) { const { data: pr } = await supabase.from('ingredient_prices').select('ingredient_id, price_per_tonne').eq('nutritionist_id', user.id).order('effective_date', { ascending: false }); const pm: Record<string,number> = {}; pr?.forEach((p: any) => { if (!pm[p.ingredient_id]) pm[p.ingredient_id] = p.price_per_tonne }); setPrices(pm) }
@@ -353,11 +389,8 @@ export default function FormulaBuilderPage() {
   const avgDMPct = totalAsFedKg > 0 ? (totalPctDM/100*batchKg)/totalAsFedKg*100 : 0
   const costAF = ings.reduce((s, fi) => { const afP=totalAsFedKg>0?getAsFedKg(fi)/totalAsFedKg:0; return s+(prices[fi.ingredient_id]||0)*afP }, 0)
 
-  // ── Shared nutrients ──
   const cp=calcNut('cp_pct'), ee=calcNut('ee_pct'), starch=calcNut('starch_pct'), ash=calcNut('ash_pct')
   const ca=calcNut('ca_pct'), pp=calcNut('p_pct'), mg=calcNut('mg_pct'), k=calcNut('k_pct'), na=calcNut('na_pct'), s2=calcNut('s_pct'), cl=calcNut('cl_pct')
-
-  // ── Ruminant nutrients ──
   const me=calcNut('me_mj'), ndf=calcNut('ndf_pct'), adf=calcNut('adf_pct')
   const lys=calcNut('lysine_pct'), met2=calcNut('methionine_pct'), thr=calcNut('threonine_pct')
   const peNDF=ings.reduce((s,fi)=>s+(fi.ingredient?.ndf_pct||0)*(fi.ingredient?.pendf_factor||0)*(fi.inclusion_pct||0)/100,0)
@@ -366,7 +399,6 @@ export default function FormulaBuilderPage() {
   const concPct=ings.reduce((s,fi)=>fi.ingredient?.particle_class==='concentrate'?s+(fi.inclusion_pct||0):s,0)
   const fcRatio=foragePct+concPct>0?`${Math.round(foragePct/(foragePct+concPct)*100)}:${Math.round(concPct/(foragePct+concPct)*100)}`:'—'
 
-  // ── Pig/Poultry nutrients ──
   const ne_pig=calcNut('ne_pig_mj'), me_pig=calcNut('me_pig_mj'), de_pig=calcNut('de_pig_mj')
   const sid_lys=calcNut('sid_lys_pct'), sid_met=calcNut('sid_met_pct'), sid_met_cys=calcNut('sid_met_cys_pct')
   const sid_thr=calcNut('sid_thr_pct'), sid_trp=calcNut('sid_trp_pct'), sid_ile=calcNut('sid_ile_pct')
@@ -376,7 +408,6 @@ export default function FormulaBuilderPage() {
   const caP_sttd = sttd_p > 0 ? ca / sttd_p : 0
   const caP_total = pp > 0 ? ca / pp : 0
 
-  // ── AA ratios to SID Lys (PIC style) ──
   const aaRatios = sid_lys > 0 ? {
     met_cys: (sid_met_cys / sid_lys * 100).toFixed(0),
     thr: (sid_thr / sid_lys * 100).toFixed(0),
@@ -388,16 +419,13 @@ export default function FormulaBuilderPage() {
     phe_tyr: (sid_phe_tyr / sid_lys * 100).toFixed(0),
   } : null
 
-  // ── SID Lys:NE calorie ratio (g/Mcal NE — PIC metric) ──
   const neMcal = ne_pig / 4.184
-  const sidLysToNE = neMcal > 0 ? (sid_lys * 10) / neMcal : 0  // g/Mcal
+  const sidLysToNE = neMcal > 0 ? (sid_lys * 10) / neMcal : 0
 
-  // ── Primary energy for mode ──
   const primaryEnergy = isPig ? ne_pig : isPoultry ? me_pig : me
   const primaryEnergyLabel = isPig ? 'NE' : isPoultry ? 'AME' : 'ME'
   const primaryEnergyUnit = 'MJ'
 
-  // ── Ruminant energy equations ──
   const de_rum = me > 0 ? me / 0.82 : 0
   const tdn = de_rum > 0 ? de_rum * 100 / 18.4 : 0
   const nel = me > 0 ? 0.703 * me - 0.19 : 0
@@ -405,13 +433,11 @@ export default function FormulaBuilderPage() {
   const nem = me > 0 ? (1.37 * meMcal - 0.138 * meMcal * meMcal + 0.0105 * meMcal * meMcal * meMcal - 1.12) * 4.184 : 0
   const neg = me > 0 ? (1.42 * meMcal - 0.174 * meMcal * meMcal + 0.0122 * meMcal * meMcal * meMcal - 1.65) * 4.184 : 0
 
-  // DMI
   const actualDMI = parseFloat(production.dmi) || 0
   const predictedDMI = formula ? predictDMI(formula.species, production, me) : 10
   const useDMI = actualDMI || predictedDMI
   const dmiPct = predictedDMI > 0 && actualDMI > 0 ? (actualDMI / predictedDMI * 100) : 0
 
-  // MP (ruminant only)
   const curModel = NUT_MODELS[nutModel]
   const mpData = isRuminant ? calculateMP(ings,me,useDMI,nutModel) : { totalCP:0,totalRDP:0,totalUDP:0,fme:0,mcp:0,mcpE:0,mcpN:0,mpFromMicrobes:0,mpFromBypass:0,mpSupply:0 }
   const mpDemand = isRuminant && formula ? calculateMPDemand(formula.species,production) : 0
@@ -424,7 +450,6 @@ export default function FormulaBuilderPage() {
   else { incomePerDay=(parseFloat(production.target_adg)||0)*(parseFloat(production.price_per_kg)||0); if(formula?.species==='pig') incomePerDay=(parseFloat(production.target_adg)||0)/1000*(parseFloat(production.price_per_kg)||0) }
   const marginPerDay = incomePerDay - dmiCost
 
-  // ── BALANCE NUTRIENTS (mode-specific) ──────────────────
   function findReq(short: string): Req|undefined { return requirements.find(r => { const n = r.nutrient.toLowerCase(); if(short==='cp') return n.includes('crude protein')||n.includes(' cp'); if(short==='me') return n.includes('energy')||n.includes(' me ')||n.includes(' de ')||n.includes(' ne '); if(short==='ndf') return n.includes('ndf'); if(short==='ee') return n.includes('fat')||n.includes('ether'); if(short==='ca') return n.includes('calcium'); if(short==='p') return n.includes('phosphorus'); if(short==='lys') return n.includes('lysine'); if(short==='sid_lys') return n.includes('sid lys')||n.includes('lysine'); if(short==='sid_met_cys') return n.includes('met+cys')||n.includes('methionine'); if(short==='sid_thr') return n.includes('threonine'); if(short==='sid_trp') return n.includes('tryptophan'); if(short==='sttd_p') return n.includes('sttd p')||n.includes('phosphorus'); return false }) }
 
   const balanceNuts = isMono ? [
@@ -443,31 +468,24 @@ export default function FormulaBuilderPage() {
 
   const formulaWarnings = ings.length > 0 ? validateFormula(ings, safetyRules, requirements, balanceNuts, findReq, totalPctDM, speciesMode) : []
  
-  // ── MP × CP cross-validated warnings (ruminant only) ────
   if (isRuminant && ings.length > 0 && totalPctDM > 50) {
     const cpReq = findReq('cp')
-    const cpNearMin = cpReq?.min != null && cp <= cpReq.min * 1.05  // within 5% of minimum
+    const cpNearMin = cpReq?.min != null && cp <= cpReq.min * 1.05
     const cpInRange = cpReq?.min != null && cpReq?.max != null && cp >= cpReq.min && cp <= cpReq.max
     const cpAboveMax = cpReq?.max != null && cp > cpReq.max
  
     if (mpBalance > 300 && cpAboveMax) {
-      // Both MP and CP are high → safe to recommend reduction
       formulaWarnings.push({ type: 'warning', message: `MP surplus (+${mpBalance.toFixed(0)}g/d) with CP above target (${cp.toFixed(1)}% > ${cpReq!.max}%) — consider replacing bypass protein with cheaper RDP sources` })
     } else if (mpBalance > 200 && cpNearMin) {
-      // MP is high but CP is at minimum → do NOT recommend reducing protein
       formulaWarnings.push({ type: 'info', message: `MP surplus (+${mpBalance.toFixed(0)}g/d) but CP near minimum (${cp.toFixed(1)}%) — protein sources are efficient, do not reduce CP below ${cpReq!.min}%` })
     } else if (mpBalance > 300 && cpInRange) {
-      // MP surplus, CP in range → mild suggestion, could shift protein type
       formulaWarnings.push({ type: 'info', message: `MP surplus (+${mpBalance.toFixed(0)}g/d) — could shift some UDP sources to cheaper RDP while keeping CP ≥${cpReq!.min}%` })
     } else if (mpBalance < -100 && mpBalance >= -400) {
-      // Moderate MP deficit
       formulaWarnings.push({ type: 'warning', message: `MP deficit (${mpBalance.toFixed(0)}g/d) — consider adding bypass protein (canola meal, DDG, blood meal)` })
     } else if (mpBalance < -400) {
-      // Severe MP deficit
       formulaWarnings.push({ type: 'error', message: `Severe MP deficit (${mpBalance.toFixed(0)}g/d) — cow will mobilize body protein, expect production loss and condition loss` })
     }
  
-    // RDP:FME ratio check — is microbial synthesis energy-limited or N-limited?
     if (mpData.mcpE < mpData.mcpN * 0.9) {
       formulaWarnings.push({ type: 'info', message: `Microbial protein is energy-limited (FME ${mpData.fme.toFixed(0)} MJ/d) — increasing ME would improve MP supply more than adding protein` })
     } else if (mpData.mcpN < mpData.mcpE * 0.85) {
@@ -481,7 +499,6 @@ export default function FormulaBuilderPage() {
   let metC=0,warnC=0,failC=0
   balanceNuts.forEach(nt=>{const req=findReq(nt.s);if(!req)return;const inR=(req.min!=null&&req.max!=null)?nt.v>=req.min&&nt.v<=req.max:(req.min!=null?nt.v>=req.min:true)&&(req.max!=null?nt.v<=req.max:true);const crit=(req.critical_max!=null&&nt.v>req.critical_max)||(req.critical_min!=null&&nt.v<req.critical_min);if(crit)failC++;else if(inR)metC++;else warnC++})
 
-  // ── ACTIONS ────────────────────────────────────────────
   function updateIngPct(idx: number,pct: number){const u=[...ings];u[idx]={...u[idx],inclusion_pct:clampInclusion(pct)};setIngs(u);setSaved(false)}
   function toggleLock(idx: number){const u=[...ings];u[idx]={...u[idx],locked:!u[idx].locked};setIngs(u)}
   function removeIng(idx: number){setIngs(ings.filter((_,i)=>i!==idx));setSaved(false)}
@@ -502,7 +519,7 @@ export default function FormulaBuilderPage() {
 
   // ── AI ──────────────────────────────────────────────────
   function buildCtx(){
-    const base = `FORMULA: ${formula.name} (v${formula.version})\nSPECIES: ${formula.species} | STAGE: ${stageName} | MODE: ${speciesMode}`
+    const base = `FORMULA: ${formula.name} (v${formula.version})\nSPECIES: ${formula.species} | STAGE: ${stageName} | MODE: ${speciesMode}\nREQ PROFILE: ${profileSource === 'linked' ? 'Linked profile' : profileSource === 'legacy' ? 'System default (legacy)' : 'None loaded'}`
     if (isMono) return `${base}\n${primaryEnergyLabel}:${primaryEnergy.toFixed(1)}MJ CP:${cp.toFixed(1)}%\nSID Lys:${sid_lys.toFixed(2)}% M+C:${sid_met_cys.toFixed(2)}% Thr:${sid_thr.toFixed(2)}% Trp:${sid_trp.toFixed(3)}%\nIle:${sid_ile.toFixed(2)}% Leu:${sid_leu.toFixed(2)}% Val:${sid_val.toFixed(2)}% His:${sid_his.toFixed(2)}%\nSID Lys:NE=${sidLysToNE.toFixed(2)}g/Mcal\nSTTD P:${sttd_p.toFixed(2)}% Ca:${ca.toFixed(2)}% Ca:STTD P=${caP_sttd.toFixed(1)}:1\nNa:${na.toFixed(2)}% Cl:${cl.toFixed(2)}%\nCost:$${costAF.toFixed(0)}/t\n${ings.map(fi=>`${fi.ingredient?.name}: ${fi.inclusion_pct.toFixed(1)}%`).join('\n')}`
     const warnCtx = formulaWarnings.filter(w => w.type !== 'error').map(w => `[${w.type.toUpperCase()}] ${w.message}`).join('\n')
     return `${base} | MODEL: ${curModel.label}\nCP:${cp.toFixed(1)}% ME:${me.toFixed(1)} NDF:${ndf.toFixed(1)}% F:C:${fcRatio} peNDF:${peNDF.toFixed(1)}% DCAD:${dcad.toFixed(0)}\nMP:${mpData.mpSupply.toFixed(0)}g/d demand:${mpDemand.toFixed(0)}g/d bal:${mpBalance>0?'+':''}${mpBalance.toFixed(0)}g/d\nCost:$${costAF.toFixed(0)}/t Margin:$${marginPerDay.toFixed(2)}/d\n${ings.map(fi=>`${fi.ingredient?.name}: ${fi.inclusion_pct.toFixed(1)}% ${fi.ingredient?.particle_class==='forage'?'[F]':'[C]'}`).join('\n')}${warnCtx ? '\n\nSYSTEM WARNINGS (respect these):\n' + warnCtx : ''}`
@@ -513,10 +530,8 @@ export default function FormulaBuilderPage() {
   if (!formula) return <div className="p-7 text-text-ghost">Loading...</div>
   const prodFields = PRODUCTION_FIELDS[formula.species]||PRODUCTION_FIELDS.beef
 
-  // ── INGREDIENT FILTER (species_suitable) ─────────────────
   const addableIngs = allIngredients.filter(i=>{
     if(ings.some(fi=>fi.ingredient_id===i.id)) return false
-    // KEY: filter by species_suitable array
     if(!(i.species_suitable as string[]||[]).includes(formula.species)) return false
     if(ingSearch&&!i.name.toLowerCase().includes(ingSearch.toLowerCase())) return false
     if(ingCatFilter==='forage'&&i.particle_class!=='forage') return false
@@ -531,12 +546,10 @@ export default function FormulaBuilderPage() {
     return true
   })
 
-  // ── CATEGORY FILTERS (mode-specific) ──────────────────
   const catFilters = isMono
     ? [{k:'',l:'All'},{k:'energy',l:'⚡ Energy'},{k:'protein',l:'🥩 Protein'},{k:'additive',l:'💊 Additive'},{k:'mineral',l:'🧪 Mineral'},{k:'byproduct',l:'♻ Byproduct'},{k:'premix',l:'📦 Premix'}]
     : [{k:'',l:'All'},{k:'forage',l:'🌿 Forage'},{k:'concentrate',l:'🌾 Concentrate'},{k:'energy',l:'⚡ Energy'},{k:'protein',l:'🥩 Protein'},{k:'byproduct',l:'♻ Byproduct'},{k:'mineral',l:'🧪 Mineral'},{k:'premix',l:'📦 Premix'}]
 
-  // ── Tab labels (mode-specific) ─────────────────────────
   const rumenTabLabel = isMono ? '🧬 AA Profile' : '🧬 Rumen'
 
   return (
@@ -549,6 +562,12 @@ export default function FormulaBuilderPage() {
             <span className="text-xs text-text-ghost font-mono">v{formula.version}</span>
             {/* SPECIES MODE BADGE */}
             <span className={`text-2xs px-2 py-0.5 rounded font-bold uppercase ${isPig?'bg-[#BE5529]/15 text-[#BE5529]':isPoultry?'bg-[#C9A043]/15 text-[#C9A043]':'bg-[#2E6B42]/15 text-[#2E6B42]'}`}>{speciesMode}</span>
+            {/* CHANGE 3.1: PROFILE SOURCE BADGE */}
+            {profileSource !== 'none' && (
+              <span className={`text-2xs px-2 py-0.5 rounded font-mono ${profileSource === 'linked' ? 'bg-brand/10 text-brand' : 'bg-status-amber/10 text-status-amber'}`}>
+                {profileSource === 'linked' ? '● profile' : '○ legacy'}
+              </span>
+            )}
           </div>
           <p className="text-xs text-text-ghost mt-0.5">{formula.client?.name||'—'} · {formula.species} · {stageName||formula.production_stage} · {batchKg}kg</p>
         </div>
@@ -569,7 +588,6 @@ export default function FormulaBuilderPage() {
       {/* Summary Bar */}
       <div className="flex items-center gap-2 mb-2 px-2.5 py-1 bg-surface-card rounded-lg border border-border text-xs flex-wrap">
         <button onClick={()=>setBasis(basis==='dm'?'asfed':'dm')} className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-border bg-surface-deep cursor-pointer hover:border-brand/30">{basis==='dm'?<ToggleLeft size={12} className="text-brand"/>:<ToggleRight size={12} className="text-status-amber"/>}<span className={`font-bold font-mono text-2xs ${basis==='dm'?'text-brand':'text-status-amber'}`}>{basis==='dm'?'DM':'AF'}</span></button>
-        {/* Model selector: only for ruminants */}
         {isRuminant && <select value={nutModel} onChange={e=>setNutModel(e.target.value as NutModelKey)} className="px-1.5 py-0.5 rounded-md border border-border bg-surface-deep text-2xs font-bold font-mono text-text-dim cursor-pointer outline-none">{(Object.keys(NUT_MODELS) as NutModelKey[]).map(k=>(<option key={k} value={k}>{NUT_MODELS[k].label}</option>))}</select>}
         {isMono && <span className="px-1.5 py-0.5 rounded-md border border-border bg-surface-deep text-2xs font-bold font-mono text-text-dim">NRC 2012</span>}
         <span className="font-mono font-bold text-brand">{metC}met</span>{warnC>0&&<span className="font-mono font-bold text-status-amber">{warnC}w</span>}{failC>0&&<span className="font-mono font-bold text-status-red">{failC}c</span>}
@@ -582,7 +600,6 @@ export default function FormulaBuilderPage() {
         <div className="flex-1"/><span className="font-mono font-bold text-status-amber">${costAF.toFixed(0)}/t</span>
         {marginPerDay!==0&&<span className={`font-mono font-bold ${marginPerDay>0?'text-brand':'text-status-red'}`}>${marginPerDay>0?'+':''}${marginPerDay.toFixed(2)}/d</span>}
       </div>
-        {/* Validation Warnings */}
       {formulaWarnings.length > 0 && (
         <div className="mb-2 px-2.5 py-1.5 rounded-lg border border-status-amber/30 bg-status-amber/5 max-h-24 overflow-auto">
           {formulaWarnings.slice(0, 5).map((w, i) => (
@@ -602,7 +619,6 @@ export default function FormulaBuilderPage() {
           <div className="card-header"><span className="text-xs font-bold text-text-muted uppercase tracking-wider">Ingredients ({ings.length})</span><button onClick={()=>{setIngSearch('');setShowAddIng(true)}} className="btn btn-ghost btn-sm"><Plus size={14}/> Add</button></div>
           <div className="flex-1 overflow-auto">
             {ings.map((fi,idx)=>{const ing=fi.ingredient;if(!ing)return null;const price=prices[fi.ingredient_id];const dmKg=(fi.inclusion_pct||0)/100*batchKg;const afKg=getAsFedKg(fi);const dispKg=basis==='dm'?dmKg:afKg
-            // Mode-specific nutrient preview in ingredient row
             const previewEnergy = isMono ? (ing.ne_pig_mj||0) : (ing.me_mj||0)
             const previewELabel = isPig ? 'NE' : isPoultry ? 'AME' : 'ME'
             const previewLys = isMono ? (ing.sid_lys_pct||0) : (ing.lysine_pct||0)
@@ -640,13 +656,10 @@ export default function FormulaBuilderPage() {
               const ceil=Math.max(req.max||req.target||1,req.critical_max||0)*1.5;const pV=Math.min((nt.v/ceil)*100,100);const pMin=req.min!=null?(req.min/ceil)*100:0;const pMax=req.max!=null?(req.max/ceil)*100:100
               return(<div key={nt.s} className="mb-1.5"><div className="flex items-center justify-between"><span className="text-[10px] font-semibold text-text-muted">{nt.l}</span><span className={`text-[10px] font-bold font-mono ${tc}`}>{nt.v<0.1?nt.v.toFixed(3):nt.v.toFixed(2)}{nt.u} <span className="font-normal text-text-ghost">({req.min}-{req.max})</span></span></div><div className="relative h-2.5 bg-surface-deep rounded mt-0.5"><div className="absolute h-full rounded opacity-15" style={{left:`${pMin}%`,width:`${pMax-pMin}%`,background:crit?'#E05252':inR?'#4CAF7D':'#D4A843'}}/><div className={`absolute top-1/2 w-2 h-2 rounded-full -translate-y-1/2 -translate-x-1/2 border-2 border-surface-bg ${color}`} style={{left:`${pV}%`}}/></div></div>)
             })}
-            {/* Extra nutrients grid */}
             <div className="mt-2 pt-1.5 border-t border-border grid grid-cols-3 gap-1">
               {isMono ? (
-                // Monogastric: show AA ratios, Na, Cl, CF
                 [['Na',na,'%'],['Cl',cl,'%'],['EE',ee,'%'],['CF',crude_fibre,'%'],['Starch',starch,'%'],['Ca:P',caP_sttd,':1'],isPig?['Lys:NE',sidLysToNE,'g/Mc']:['Linoleic',linoleic,'%'],['Mg',mg,'%'],['K',k,'%']].map(([l,v,u])=>(<div key={l as string} className="text-center"><div className="text-[8px] text-text-ghost uppercase">{l}</div><div className="text-[10px] font-mono font-bold text-text-dim">{(v as number)<1?(v as number).toFixed(3):(v as number).toFixed(1)}{u}</div></div>))
               ) : (
-                // Ruminant: existing grid
                 [['NDF',ndf,'%'],['Starch',starch,'%'],['EE',ee,'%'],['Ca:P',caP_total,':1'],['Mg',mg,'%'],['Na',na,'%'],['K',k,'%'],['S',s2,'%'],['ADF',adf,'%']].map(([l,v,u])=>(<div key={l as string} className="text-center"><div className="text-[8px] text-text-ghost uppercase">{l}</div><div className="text-[10px] font-mono font-bold text-text-dim">{(v as number)<1?(v as number).toFixed(3):(v as number).toFixed(1)}{u}</div></div>))
               )}
             </div>
@@ -655,12 +668,9 @@ export default function FormulaBuilderPage() {
           {/* RUMEN / AA PROFILE */}
           {rightTab==='rumen'&&<div className="card p-2.5 flex-1 overflow-auto">
             {isMono ? (
-              /* ── MONOGASTRIC: AA PROFILE ── */
               <>
                 <div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">SID Amino Acid Profile <span className="text-text-ghost font-normal normal-case">(NRC 2012)</span></div>
-                {/* AA absolute values */}
                 {[['SID Lys',sid_lys],['SID Met',sid_met],['SID Met+Cys',sid_met_cys],['SID Thr',sid_thr],['SID Trp',sid_trp],['SID Ile',sid_ile],['SID Leu',sid_leu],['SID Val',sid_val],['SID His',sid_his],['SID Phe+Tyr',sid_phe_tyr],['SID Arg',sid_arg]].map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{(v as number).toFixed(3)}%</span></div>))}
-                {/* AA ratios to Lys */}
                 {aaRatios && <>
                   <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">AA Ratios to SID Lys (%)</div>
                   {[['Met+Cys',aaRatios.met_cys, isPig?'55':'60'],['Thr',aaRatios.thr, isPig?'63':'65'],['Trp',aaRatios.trp, isPig?'19':'18'],['Ile',aaRatios.ile, isPig?'54':'60'],['Leu',aaRatios.leu, '100'],['Val',aaRatios.val, isPig?'65':'70'],['His',aaRatios.his, isPig?'32':'32'],['Phe+Tyr',aaRatios.phe_tyr, isPig?'95':'95']].map(([l,v,min])=>{
@@ -668,13 +678,11 @@ export default function FormulaBuilderPage() {
                     return(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><div className="flex items-center gap-1.5"><span className="text-[9px] text-text-ghost">min {min}%</span><span className={`text-[10px] font-mono font-bold ${ok?'text-brand':'text-status-red'}`}>{v}%</span></div></div>)
                   })}</div>
                 </>}
-                {/* Energy systems */}
                 <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Energy</div>
                 {[['DE',de_pig,'MJ/kg'],['ME',me_pig,'MJ/kg'],['NE',ne_pig,'MJ/kg'],['NE',neMcal.toFixed(2),'Mcal/kg']].map(([l,v,u])=>(<div key={`${l}-${u}`} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold text-text-dim">{typeof v === 'number'?v.toFixed(2):v} {u}</span></div>))}</div>
                 {isPig && sidLysToNE > 0 && <div className={`mt-2 text-center text-xs font-bold font-mono px-2 py-1.5 rounded-lg ${sidLysToNE > 2 ? 'bg-brand/10 text-brand' : 'bg-status-amber/10 text-status-amber'}`}>SID Lys:NE = {sidLysToNE.toFixed(2)} g/Mcal</div>}
               </>
             ) : (
-              /* ── RUMINANT: MP + RUMEN HEALTH ── */
               <>
                 <div className="text-[10px] font-bold text-text-muted uppercase mb-1.5">Metabolisable Protein <span className="text-text-ghost font-normal normal-case">({curModel.label})</span></div>
                 <div className={`text-center text-xs font-bold font-mono mb-2 px-2 py-1.5 rounded-lg ${mpBalance>=0?'bg-brand/10 text-brand':'bg-status-red/10 text-status-red'}`}>MP: {mpData.mpSupply.toFixed(0)}g / {mpDemand.toFixed(0)}g = {mpBalance>0?'+':''}{mpBalance.toFixed(0)} g/d</div>
@@ -693,7 +701,6 @@ export default function FormulaBuilderPage() {
               const nutrients = isMono
                 ? [{l:primaryEnergyLabel,v:primaryEnergy,u:'MJ',target:0,min:0,max:0},{l:'CP',v:cp,u:'%',target:0,min:0,max:0},{l:'SID Lys',v:sid_lys,u:'%',target:0,min:0,max:0},{l:'SID M+C',v:sid_met_cys,u:'%',target:0,min:0,max:0},{l:'SID Thr',v:sid_thr,u:'%',target:0,min:0,max:0},{l:'SID Trp',v:sid_trp,u:'%',target:0,min:0,max:0},{l:'STTD P',v:sttd_p,u:'%',target:0,min:0,max:0},{l:'Ca',v:ca,u:'%',target:0,min:0,max:0},{l:'Na',v:na,u:'%',target:0,min:0,max:0}]
                 : [{l:'ME',v:me,u:'MJ',target:0,min:0,max:0},{l:'CP',v:cp,u:'%',target:0,min:0,max:0},{l:'NDF',v:ndf,u:'%',target:0,min:0,max:0},{l:'EE',v:ee,u:'%',target:0,min:0,max:0},{l:'Ca',v:ca,u:'%',target:0,min:0,max:0},{l:'P',v:pp,u:'%',target:0,min:0,max:0},{l:'Starch',v:starch,u:'%',target:0,min:0,max:0}]
-              // Map requirements
               nutrients.forEach(nt=>{const req=findReq(nt.l.toLowerCase().replace('sid ','').replace('sttd ',''));if(req){nt.target=req.target;nt.min=req.min||0;nt.max=req.max||0}})
               const hasReqs=nutrients.some(nt=>nt.target>0)
               return(<>
@@ -704,7 +711,6 @@ export default function FormulaBuilderPage() {
                 const barColor=!hasReqs?'#378ADD':inRange?'#4CAF7D':nt.v<(nt.min||0)?'#D4A843':'#E24B4A'
                 const maxBar=Math.max(nt.max||nt.target||nt.v,nt.v)*1.3;const barW=maxBar>0?Math.min(nt.v/maxBar*100,100):0;const minW=maxBar>0&&nt.min>0?nt.min/maxBar*100:0;const maxW=maxBar>0&&nt.max>0?nt.max/maxBar*100:100
                 return(<div key={nt.l} className="mb-2"><div className="flex justify-between items-baseline mb-0.5"><span className="text-[10px] font-semibold text-text-muted">{nt.l}</span><div className="flex items-baseline gap-1.5"><span className="text-[10px] font-mono font-bold" style={{color:barColor}}>{nt.v<0.1?nt.v.toFixed(3):nt.v.toFixed(2)}{nt.u}</span>{nt.target>0&&<span className="text-[9px] text-text-ghost">/ {nt.target<0.1?nt.target.toFixed(3):nt.target.toFixed(1)}</span>}{pctOfTarget>0&&<span className={`text-[9px] font-mono font-bold ${inRange?'text-brand':pctOfTarget<90?'text-status-amber':'text-status-red'}`}>{pctOfTarget.toFixed(0)}%</span>}</div></div><div className="relative h-3 bg-surface-deep rounded-sm overflow-hidden">{nt.min>0&&nt.max>0&&<div className="absolute h-full rounded-sm" style={{left:`${minW}%`,width:`${maxW-minW}%`,background:'rgba(76,175,125,0.12)'}}/>}<div className="h-full rounded-sm transition-all" style={{width:`${barW}%`,background:barColor,opacity:0.7}}/></div></div>)})}
-              {/* Key ratios */}
               <div className="mt-2 pt-1.5 border-t border-border"><div className="text-[10px] font-bold text-text-muted uppercase mb-1">Key ratios</div>
               {isMono
                 ? [['Ca:STTD P',caP_sttd.toFixed(1)+':1',caP_sttd<1.8||caP_sttd>3.0?'#E24B4A':'#4CAF7D'],isPig?['SID Lys:NE',sidLysToNE.toFixed(2)+' g/Mc',sidLysToNE<2?'#D4A843':'#4CAF7D']:['Linoleic',linoleic.toFixed(2)+'%','#378ADD'],['CP min',cp.toFixed(1)+'%',cp<13?'#E24B4A':'#4CAF7D'],['Na',na.toFixed(2)+'%',na<0.15?'#E24B4A':'#4CAF7D']].map(([l,v,c])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[10px] text-text-muted">{l}</span><span className="text-[10px] font-mono font-bold" style={{color:c as string}}>{v}</span></div>))
@@ -730,7 +736,7 @@ export default function FormulaBuilderPage() {
         </div>
       </div>
 
-      {/* ── ADD INGREDIENT MODAL ─────────────────────────── */}
+      {/* ADD INGREDIENT MODAL */}
       {showAddIng&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowAddIng(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-lg shadow-2xl max-h-[80vh] flex flex-col" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-border"><h2 className="text-lg font-bold text-text">Add Ingredient</h2><span className="text-2xs text-text-ghost font-mono">{addableIngs.length} for {formula.species}</span><button onClick={()=>setShowAddIng(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
         <div className="p-3 border-b border-border">
@@ -738,7 +744,6 @@ export default function FormulaBuilderPage() {
           <div className="flex gap-1 flex-wrap">{catFilters.map(f=>(<button key={f.k} onClick={()=>setIngCatFilter(f.k)} className={`px-2.5 py-1 rounded text-2xs font-semibold transition-all border cursor-pointer ${ingCatFilter===f.k?'border-brand bg-brand/10 text-brand':'border-border text-text-ghost hover:border-border-light bg-transparent'}`}>{f.l}</button>))}</div>
         </div>
         <div className="flex-1 overflow-auto">{addableIngs.length>0?addableIngs.map(ing=>{
-          // Mode-specific preview in add modal
           const eLabel = isPig ? 'NE' : isPoultry ? 'AME' : 'ME'
           const eVal = isPig ? (ing.ne_pig_mj||0) : isPoultry ? (ing.me_pig_mj||0) : (ing.me_mj||0)
           const lysLabel = isMono ? 'SID Lys' : 'Lys'
@@ -748,7 +753,7 @@ export default function FormulaBuilderPage() {
           return(<div key={ing.id} onClick={()=>addIngredient(ing.id)} className="flex items-center gap-3 px-4 py-2 border-b border-border/5 hover:bg-[#312B26] cursor-pointer"><div className="flex-1"><div className="text-sm font-semibold text-text-dim">{ing.name}</div><div className="text-2xs text-text-ghost">{ing.category} · CP {ing.cp_pct||0}% · {eLabel} {eVal.toFixed(1)} · {lysLabel} {lysVal.toFixed(2)}% · {pLabel} {pVal.toFixed(2)}%</div></div>{prices[ing.id]&&<span className="text-xs font-mono text-status-amber">${prices[ing.id].toFixed(0)}/t</span>}<Plus size={14} className="text-brand"/></div>)}):<div className="px-4 py-8 text-center text-sm text-text-ghost">No matching ingredients for {formula.species}.</div>}</div>
       </div></div>}
 
-      {/* ── OPTIMIZER ────────────────────────────────── */}
+      {/* OPTIMIZER */}
       {showOptimizer&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowOptimizer(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-2xl p-6 shadow-2xl max-h-[80vh] overflow-auto" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><Zap size={18} className="text-status-amber"/><div><div className="text-lg font-bold text-text">Least-Cost Optimizer</div><div className="text-2xs text-text-ghost">{speciesMode} mode · {optConstraints.filter(c=>c.enabled).length} active constraints</div></div></div><button onClick={()=>setShowOptimizer(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
         <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">Nutrient Constraints<span className="flex-1 h-px bg-border"/></div>
@@ -757,14 +762,14 @@ export default function FormulaBuilderPage() {
         {optResult&&<div className={`p-4 rounded-lg border ${optResult.feasible?'border-brand/30 bg-brand/5':'border-status-red/30 bg-status-red/5'}`}><div className="flex items-center gap-2 mb-2"><span className={`text-sm font-bold ${optResult.feasible?'text-brand':'text-status-red'}`}>{optResult.feasible?'✓ Feasible':'✗ No feasible solution'}</span></div>{optResult.feasible&&<><div className="text-xs text-text-muted mb-2">Cost: <strong className="text-status-amber font-mono">${optResult.cost.toFixed(0)}/t</strong> (saving <strong className="text-brand">${(costAF-optResult.cost).toFixed(0)}/t</strong>)</div><button onClick={applyOptResult} className="btn btn-primary btn-sm w-full justify-center">Apply Optimized Diet</button></>}</div>}
       </div></div>}
 
-      {/* ── COMPARE ──────────────────────────────────── */}
+      {/* COMPARE */}
       {showCompare&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowCompare(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-4xl p-6 shadow-2xl max-h-[80vh] overflow-auto" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><GitCompare size={18} className="text-brand"/><div className="text-lg font-bold text-text">Diet Compare</div></div><button onClick={()=>setShowCompare(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
         <div className="flex gap-2 mb-4">{[0,1,2,3].map(i=>(<button key={i} onClick={()=>saveToCompareSlot(i)} className="btn btn-ghost btn-sm flex-1 justify-center">Save Slot {i+1}</button>))}</div>
         <div className="grid grid-cols-4 gap-3">{compareSlots.map((slot, i) => (<div key={i} className={`rounded-lg border p-3 ${slot?'border-border bg-surface-card':'border-border/30 bg-surface-bg/50'}`}><div className="text-2xs font-bold text-text-ghost uppercase mb-2">Slot {i+1}</div>{slot?<><div className="text-xs font-semibold text-text-dim mb-2">{slot.name}</div>{(isMono?[['Energy',slot.nutrients.me?.toFixed(1)],['SID Lys',(slot.nutrients.sid_lys||0).toFixed(2)+'%'],['STTD P',(slot.nutrients.sttd_p||0).toFixed(2)+'%'],['Cost','$'+slot.cost.toFixed(0)+'/t']]:[['ME',slot.nutrients.me?.toFixed(1)],['CP',slot.nutrients.cp?.toFixed(1)+'%'],['F:C',slot.fc],['Cost','$'+slot.cost.toFixed(0)+'/t']]).map(([l,v])=>(<div key={l as string} className="flex justify-between py-0.5"><span className="text-[9px] text-text-ghost">{l}</span><span className="text-[9px] font-mono font-bold text-text-dim">{v}</span></div>))}<div className="flex gap-1 mt-2"><button onClick={()=>recallFromSlot(i)} className="btn btn-primary btn-sm flex-1 justify-center text-2xs"><RotateCcw size={10}/> Recall</button><button onClick={()=>clearSlot(i)} className="btn btn-ghost btn-sm text-2xs"><X size={10}/></button></div></>:<div className="text-2xs text-text-ghost text-center py-6">Empty</div>}</div>))}</div>
       </div></div>}
 
-      {/* ── AI ────────────────────────────────────────── */}
+      {/* AI */}
       {showAi&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowAi(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-border"><div className="flex items-center gap-2"><Sparkles size={16} className="text-brand"/><div className="text-base font-bold text-text">Optia AI Review</div><span className={`text-2xs px-1.5 py-0.5 rounded font-bold ${isPig?'bg-[#BE5529]/15 text-[#BE5529]':isPoultry?'bg-[#C9A043]/15 text-[#C9A043]':'bg-[#2E6B42]/15 text-[#2E6B42]'}`}>{speciesMode}</span></div><button onClick={()=>setShowAi(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
         <div className="flex-1 overflow-auto p-4">{aiLoading&&!aiReview&&<div className="flex items-center gap-3 text-text-ghost"><Loader2 size={16} className="animate-spin"/> Analyzing {speciesMode} diet...</div>}{aiReview&&<div className="text-sm text-text-dim leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{__html:aiReview.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br/>')}}/>}</div>
