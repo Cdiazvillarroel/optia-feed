@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  const resend = new Resend(process.env.RESEND_API_KEY)
+  const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 
   try {
     const body: SignupBody = await req.json()
@@ -143,22 +143,24 @@ export async function POST(req: NextRequest) {
 
     // ── Enviar welcome email ────────────────────
     try {
-      await resend.emails.send({
-        from: 'Optia Feed <hello@optiafeed.cloud>',
-        to: body.email,
-        subject: 'Welcome to Optia Feed — Your 24-hour trial is active',
-        html: renderWelcomeEmail({
-          name: body.fullName.split(' ')[0],
-          species: body.species,
-          trialExpiresAt,
-          loginUrl: `${process.env.NEXT_PUBLIC_APP_URL}/login`,
-        }),
-      })
+      if (resend) {
+        await resend.emails.send({
+          from: 'Optia Feed <hello@optiafeed.cloud>',
+          to: body.email,
+          subject: 'Welcome to Optia Feed — Your 24-hour trial is active',
+          html: renderWelcomeEmail({
+            name: body.fullName.split(' ')[0],
+            species: body.species,
+            trialExpiresAt,
+            loginUrl: `${process.env.NEXT_PUBLIC_APP_URL}/login`,
+          }),
+        })
 
-      await supabaseAdmin
-        .from('user_profiles')
-        .update({ welcome_email_sent: true })
-        .eq('id', userId)
+        await supabaseAdmin
+          .from('user_profiles')
+          .update({ welcome_email_sent: true })
+          .eq('id', userId)
+      }
     } catch (emailError) {
       console.error('Welcome email failed (non-fatal):', emailError)
     }
