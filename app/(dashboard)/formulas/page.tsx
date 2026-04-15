@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy, Bookmark, BookmarkCheck, AlertTriangle, Check } from 'lucide-react'
+import { Plus, Search, FlaskConical, X, Pencil, Trash2, Copy, Bookmark, BookmarkCheck, AlertTriangle, Check, Shield } from 'lucide-react'
+import ProfileEditorModal from '@/components/ProfileEditorModal'
 
 const SPECIES_OPTIONS = [
   { value: 'cattle', label: 'Dairy Cattle', short: 'Dairy' },
@@ -117,6 +118,8 @@ export default function FormulasPage() {
   const [newName, setNewName] = useState('')
   const [newBatch, setNewBatch] = useState('1000')
   const [newTemplateId, setNewTemplateId] = useState('')
+  // ── Profile Editor Modal state ──
+  const [showProfileEditor, setShowProfileEditor] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -267,7 +270,10 @@ export default function FormulasPage() {
     <div className="p-7 max-w-[1200px]">
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-bold text-text">Formulas</h1>
-        <button onClick={() => { setNewName(''); setNewSpecies('cattle'); setNewStage(''); setNewBreed(''); setNewClientId(''); setNewAnimalGroupId(''); setNewBatch('1000'); setNewTemplateId(''); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
+        <div className="flex gap-1.5">
+          <button onClick={() => setShowProfileEditor(true)} className="btn btn-ghost"><Shield size={14} /> Profiles</button>
+          <button onClick={() => { setNewName(''); setNewSpecies('cattle'); setNewStage(''); setNewBreed(''); setNewClientId(''); setNewAnimalGroupId(''); setNewBatch('1000'); setNewTemplateId(''); setShowCreate(true) }} className="btn btn-primary"><Plus size={14} /> New Formula</button>
+        </div>
       </div>
 
       <div className="flex gap-2.5 mb-2 items-center">
@@ -476,6 +482,12 @@ export default function FormulasPage() {
           </div>
         </div>
       )}
+
+      {/* ── PROFILE EDITOR MODAL ────────────────────────────── */}
+      <ProfileEditorModal
+        open={showProfileEditor}
+        onClose={() => setShowProfileEditor(false)}
+      />
     </div>
   )
 }
