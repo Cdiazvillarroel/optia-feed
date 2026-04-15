@@ -368,8 +368,41 @@ export default function FormulaBuilderPage() {
     {s:'cp',l:'CP',v:cp,u:'%'},{s:'me',l:'ME',v:me,u:'MJ'},{s:'ndf',l:'NDF',v:ndf,u:'%'},
     {s:'ee',l:'EE',v:ee,u:'%'},{s:'ca',l:'Ca',v:ca,u:'%'},{s:'p',l:'P',v:pp,u:'%'},{s:'lys',l:'Lys',v:lys,u:'%'}
   ]
-  
+
   const formulaWarnings = ings.length > 0 ? validateFormula(ings, safetyRules, requirements, balanceNuts, findReq, totalPctDM, speciesMode) : []
+ 
+  // ── MP × CP cross-validated warnings (ruminant only) ────
+  if (isRuminant && ings.length > 0 && totalPctDM > 50) {
+    const cpReq = findReq('cp')
+    const cpNearMin = cpReq?.min != null && cp <= cpReq.min * 1.05  // within 5% of minimum
+    const cpInRange = cpReq?.min != null && cpReq?.max != null && cp >= cpReq.min && cp <= cpReq.max
+    const cpAboveMax = cpReq?.max != null && cp > cpReq.max
+ 
+    if (mpBalance > 300 && cpAboveMax) {
+      // Both MP and CP are high → safe to recommend reduction
+      formulaWarnings.push({ type: 'warning', message: `MP surplus (+${mpBalance.toFixed(0)}g/d) with CP above target (${cp.toFixed(1)}% > ${cpReq!.max}%) — consider replacing bypass protein with cheaper RDP sources` })
+    } else if (mpBalance > 200 && cpNearMin) {
+      // MP is high but CP is at minimum → do NOT recommend reducing protein
+      formulaWarnings.push({ type: 'info', message: `MP surplus (+${mpBalance.toFixed(0)}g/d) but CP near minimum (${cp.toFixed(1)}%) — protein sources are efficient, do not reduce CP below ${cpReq!.min}%` })
+    } else if (mpBalance > 300 && cpInRange) {
+      // MP surplus, CP in range → mild suggestion, could shift protein type
+      formulaWarnings.push({ type: 'info', message: `MP surplus (+${mpBalance.toFixed(0)}g/d) — could shift some UDP sources to cheaper RDP while keeping CP ≥${cpReq!.min}%` })
+    } else if (mpBalance < -100 && mpBalance >= -400) {
+      // Moderate MP deficit
+      formulaWarnings.push({ type: 'warning', message: `MP deficit (${mpBalance.toFixed(0)}g/d) — consider adding bypass protein (canola meal, DDG, blood meal)` })
+    } else if (mpBalance < -400) {
+      // Severe MP deficit
+      formulaWarnings.push({ type: 'error', message: `Severe MP deficit (${mpBalance.toFixed(0)}g/d) — cow will mobilize body protein, expect production loss and condition loss` })
+    }
+ 
+    // RDP:FME ratio check — is microbial synthesis energy-limited or N-limited?
+    if (mpData.mcpE < mpData.mcpN * 0.9) {
+      formulaWarnings.push({ type: 'info', message: `Microbial protein is energy-limited (FME ${mpData.fme.toFixed(0)} MJ/d) — increasing ME would improve MP supply more than adding protein` })
+    } else if (mpData.mcpN < mpData.mcpE * 0.85) {
+      formulaWarnings.push({ type: 'warning', message: `Microbial protein is N-limited (RDP ${mpData.totalRDP.toFixed(0)}g/d) — rumen microbes have energy but insufficient degradable protein` })
+    }
+  }
+ 
   const errorCount = formulaWarnings.filter(w => w.type === 'error').length
   const warningCount = formulaWarnings.filter(w => w.type === 'warning').length
   
