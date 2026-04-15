@@ -467,7 +467,7 @@ export default function FormulasPage() {
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setShowCreate(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
                 <button onClick={handleCreate}
-                  disabled={loading || !newName.trim() || !newStage || (newClientId && !newAnimalGroupId) || (newClientId && newAnimalGroupId && !selectedProfile)}
+                  disabled={loading || !newName.trim() || !newStage || !!(newClientId && !newAnimalGroupId) || !!(newClientId && newAnimalGroupId && !selectedProfile)}
                   className="btn btn-primary flex-1 justify-center disabled:opacity-50">
                   {loading ? 'Creating...' : newTemplateId ? 'Create from Template' : 'Create Formula'}
                 </button>
