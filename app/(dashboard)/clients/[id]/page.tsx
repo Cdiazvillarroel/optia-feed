@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { Plus, Edit2, Trash2, X, ChevronRight, Check, AlertTriangle } from 'lucide-react'
+import { Plus, Edit2, Trash2, X, ChevronRight, Check, AlertTriangle, Shield } from 'lucide-react'
+import ProfileEditorModal from '@/components/ProfileEditorModal'
 
 const STAGES: Record<string, string[]> = {
   cattle: ['early_lactation','mid_lactation','late_lactation','dry_cow_far_off','dry_cow_close_up','heifer_growing','heifer_pre_calving'],
@@ -71,6 +72,9 @@ export default function ClientDetailPage() {
   const [animalSpecies, setAnimalSpecies] = useState('cattle')
   const [editAnimalSpecies, setEditAnimalSpecies] = useState('cattle')
   const [loading, setLoading] = useState(false)
+  // ── Profile Editor Modal state ──
+  const [showProfileEditor, setShowProfileEditor] = useState(false)
+  const [profileEditorTarget, setProfileEditorTarget] = useState<{ id: string; name: string } | null>(null)
 
   useEffect(() => { loadData() }, [params.id])
 
@@ -196,6 +200,17 @@ export default function ClientDetailPage() {
     loadData()
   }
 
+  // ── Profile editor helpers ──
+  function openProfileEditorForGroup(ag: any) {
+    setProfileEditorTarget({ id: ag.id, name: ag.name })
+    setShowProfileEditor(true)
+  }
+
+  function openProfileEditorBrowse() {
+    setProfileEditorTarget(null)
+    setShowProfileEditor(true)
+  }
+
   if (!client) return <div className="p-7 text-text-ghost">Loading...</div>
 
   const totalAnimals = animals.reduce((s, a) => s + (a.count || 0), 0)
@@ -248,7 +263,10 @@ export default function ClientDetailPage() {
               </span>
             )}
           </div>
-          <button onClick={() => setShowAddAnimal(true)} className="btn btn-ghost btn-sm"><Plus size={14} /> Add Group</button>
+          <div className="flex gap-1.5">
+            <button onClick={openProfileEditorBrowse} className="btn btn-ghost btn-sm"><Shield size={14} /> Profiles</button>
+            <button onClick={() => setShowAddAnimal(true)} className="btn btn-ghost btn-sm"><Plus size={14} /> Add Group</button>
+          </div>
         </div>
 
         {animals.length > 0 ? animals.map((a) => {
@@ -276,17 +294,29 @@ export default function ClientDetailPage() {
                 {a.milk_yield > 0 && <span className="text-sm text-text-muted font-mono flex-shrink-0">{a.milk_yield} L/d</span>}
                 {a.target_adg > 0 && <span className="text-sm text-text-muted font-mono flex-shrink-0">{a.target_adg} kg/d</span>}
 
-                {/* Profile badge */}
+                {/* Profile badge — click toggles inline selector, long-press/right area opens editor */}
                 {hasProfile ? (
-                  <button onClick={() => setShowProfileSelector(showProfileSelector === a.id ? null : a.id)}
-                    className="text-2xs px-2 py-0.5 rounded bg-brand/10 text-brand font-bold cursor-pointer border-none hover:bg-brand/20 flex items-center gap-1 flex-shrink-0">
-                    <Check size={10} /> {profile.stage_name}
-                  </button>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={() => setShowProfileSelector(showProfileSelector === a.id ? null : a.id)}
+                      className="text-2xs px-2 py-0.5 rounded bg-brand/10 text-brand font-bold cursor-pointer border-none hover:bg-brand/20 flex items-center gap-1">
+                      <Check size={10} /> {profile.stage_name}
+                    </button>
+                    <button onClick={() => openProfileEditorForGroup(a)}
+                      className="text-text-ghost/40 hover:text-brand bg-transparent border-none cursor-pointer p-0.5" title="Edit profile">
+                      <Shield size={11} />
+                    </button>
+                  </div>
                 ) : (
-                  <button onClick={() => setShowProfileSelector(a.id)}
-                    className="text-2xs px-2 py-0.5 rounded bg-status-amber/10 text-status-amber font-bold cursor-pointer border-none hover:bg-status-amber/20 flex items-center gap-1 flex-shrink-0">
-                    <AlertTriangle size={10} /> Assign Profile
-                  </button>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={() => setShowProfileSelector(a.id)}
+                      className="text-2xs px-2 py-0.5 rounded bg-status-amber/10 text-status-amber font-bold cursor-pointer border-none hover:bg-status-amber/20 flex items-center gap-1">
+                      <AlertTriangle size={10} /> Assign Profile
+                    </button>
+                    <button onClick={() => openProfileEditorForGroup(a)}
+                      className="text-text-ghost/40 hover:text-brand bg-transparent border-none cursor-pointer p-0.5" title="Manage profiles">
+                      <Shield size={11} />
+                    </button>
+                  </div>
                 )}
 
                 {/* Formula link or create button */}
@@ -353,7 +383,12 @@ export default function ClientDetailPage() {
                     {compatibleProfiles.length === 0 && otherProfiles.length === 0 && (
                       <div className="text-sm text-text-ghost text-center py-4">No profiles found for {a.species}</div>
                     )}
-                    <button onClick={() => setShowProfileSelector(null)} className="w-full mt-2 text-xs text-text-ghost hover:text-text-muted bg-transparent border-none cursor-pointer py-1.5 border-t border-border">Close</button>
+                    <div className="flex gap-2 mt-2 pt-2 border-t border-border">
+                      <button onClick={() => openProfileEditorForGroup(a)} className="flex-1 text-xs text-brand hover:text-brand/80 bg-transparent border-none cursor-pointer py-1.5 font-semibold">
+                        <Shield size={11} className="inline mr-1" /> Manage Profiles
+                      </button>
+                      <button onClick={() => setShowProfileSelector(null)} className="flex-1 text-xs text-text-ghost hover:text-text-muted bg-transparent border-none cursor-pointer py-1.5">Close</button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -558,6 +593,20 @@ export default function ClientDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── PROFILE EDITOR MODAL ────────────────────────────── */}
+      <ProfileEditorModal
+        open={showProfileEditor}
+        onClose={() => { setShowProfileEditor(false); setProfileEditorTarget(null) }}
+        species={client?.species?.[0]}
+        animalGroupId={profileEditorTarget?.id}
+        animalGroupName={profileEditorTarget?.name}
+        onProfileSelected={async () => {
+          await loadData()
+          setShowProfileEditor(false)
+          setProfileEditorTarget(null)
+        }}
+      />
     </div>
   )
 }
