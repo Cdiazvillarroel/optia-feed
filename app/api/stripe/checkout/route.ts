@@ -8,8 +8,7 @@ import Stripe from 'stripe'
 export async function POST(req: NextRequest) {
   try {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
-    })
-
+    
     const PRICE_IDS: Record<string, string> = {
       starter:       process.env.STRIPE_PRICE_STARTER!,
       professional:  process.env.STRIPE_PRICE_PROFESSIONAL!,
