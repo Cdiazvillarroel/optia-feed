@@ -1,33 +1,13 @@
 // app/api/auth/signup/route.ts
-// ============================================
-// OPTIA FEED — Signup Handler
-// Called from the landing page form (Netlify → Vercel)
-// Includes CORS for cross-origin requests
-// ============================================
-
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { seedUserData } from '@/lib/seed-user-data'
 import { renderWelcomeEmail } from '@/emails/welcome'
 
-function getSupabaseAdmin() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
-}
-
-function getResend() {
-  return new Resend(process.env.RESEND_API_KEY)
-}
-
-const resend = new Resend(process.env.RESEND_API_KEY)
-
-// Dominios permitidos (tu landing page)
 const ALLOWED_ORIGINS = [
   'https://optiafeed.cloud',
-  'http://localhost:3000', // para desarrollo local
+  'http://localhost:3000',
 ]
 
 function corsHeaders(origin: string | null) {
@@ -39,7 +19,6 @@ function corsHeaders(origin: string | null) {
   }
 }
 
-// Preflight request (el browser lo envía antes del POST)
 export async function OPTIONS(req: NextRequest) {
   const origin = req.headers.get('origin')
   return new NextResponse(null, { status: 200, headers: corsHeaders(origin) })
@@ -58,6 +37,13 @@ interface SignupBody {
 export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin')
   const headers = corsHeaders(origin)
+
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const resend = new Resend(process.env.RESEND_API_KEY)
 
   try {
     const body: SignupBody = await req.json()
