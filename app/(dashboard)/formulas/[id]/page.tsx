@@ -777,20 +777,8 @@ export default function FormulaBuilderPage() {
         <div className="flex-1 overflow-auto p-4">{aiLoading&&!aiReview&&<div className="flex items-center gap-3 text-text-ghost"><Loader2 size={16} className="animate-spin"/> Analyzing {speciesMode} diet...</div>}{aiReview&&<div className="text-sm text-text-dim leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{__html:aiReview.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br/>')}}/>}</div>
         <div className="p-4 border-t border-border flex gap-2"><input value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAiQ()} placeholder="Ask..." className="flex-1 px-3 py-2 rounded-lg border border-border bg-surface-deep text-text-dim text-sm outline-none focus:border-brand"/><button onClick={handleAiQ} disabled={aiLoading} className="btn btn-primary btn-sm">{aiLoading?<Loader2 size={14} className="animate-spin"/>:'Ask'}</button><button onClick={handleAiReview} disabled={aiLoading} className="btn btn-ai btn-sm">Re-review</button></div>
       </div></div>}
-    // FIND:
-      {showAi&&<div className="fixed inset-0 bg-black/40 z-50
-      ...
-      </div></div>}
-    </div>
-  )
-}
-
-// REPLACE (agregar antes del cierre):
-      {showAi&&<div className="fixed inset-0 bg-black/40 z-50
-      ...
-      </div></div>}
-
-      {/* PROFILE EDITOR */}
+      
+     {/* PROFILE EDITOR */}
       <ProfileEditorModal
         open={showProfileEditor}
         onClose={() => setShowProfileEditor(false)}
