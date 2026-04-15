@@ -96,16 +96,20 @@ function runOptimizer(ings: any[], prices: Record<string,number>, constraints: O
 }
 
 // ── DEFAULT OPTIMIZER CONSTRAINTS BY MODE ─────────────────
-function defaultOptConstraints(mode: SpeciesMode): OptConstraint[] {
-  if (mode === 'pig') return [
-    { key: 'ne_pig_mj', label: 'NE (MJ/kg)', enabled: true, min: 9.0, max: 11.5 },
-    { key: 'cp_pct', label: 'CP (%)', enabled: true, min: 14, max: 22 },
-    { key: 'sid_lys_pct', label: 'SID Lys (%)', enabled: true, min: 0.80, max: 1.40 },
-    { key: 'sttd_p_pct', label: 'STTD P (%)', enabled: false, min: 0.25, max: 0.45 },
-    { key: 'ca_pct', label: 'Ca (%)', enabled: false, min: 0.50, max: 0.90 },
-    { key: 'ee_pct', label: 'Fat (%)', enabled: false, min: 2, max: 8 },
-    { key: 'crude_fibre_pct', label: 'CF (%)', enabled: false, min: 2, max: 7 },
-  ]
+function defaultOptConstraints(mode: SpeciesMode, stage?: string): OptConstraint[] {
+  if (mode === 'pig') {
+    const isGrower = stage?.includes('grower')
+    const isSow = stage?.includes('sow') || stage?.includes('lactation')
+    return [
+      { key: 'ne_pig_mj', label: 'NE (MJ/kg)', enabled: true, min: isGrower ? 9.5 : isSow ? 9.0 : 9.5, max: isGrower ? 10.5 : isSow ? 10.5 : 11.0 },
+      { key: 'cp_pct', label: 'CP (%)', enabled: true, min: isGrower ? 18 : isSow ? 17 : 14, max: isGrower ? 22 : isSow ? 20 : 18 },
+      { key: 'sid_lys_pct', label: 'SID Lys (%)', enabled: true, min: isGrower ? 1.05 : isSow ? 0.85 : 0.70, max: isGrower ? 1.35 : isSow ? 1.10 : 1.00 },
+      { key: 'sttd_p_pct', label: 'STTD P (%)', enabled: false, min: 0.25, max: 0.45 },
+      { key: 'ca_pct', label: 'Ca (%)', enabled: false, min: 0.50, max: 0.90 },
+      { key: 'ee_pct', label: 'Fat (%)', enabled: false, min: 2, max: 8 },
+      { key: 'crude_fibre_pct', label: 'CF (%)', enabled: false, min: 2, max: 7 },
+    ]
+  }
   if (mode === 'poultry') return [
     { key: 'me_pig_mj', label: 'AME (MJ/kg)', enabled: true, min: 11.0, max: 13.5 },
     { key: 'cp_pct', label: 'CP (%)', enabled: true, min: 16, max: 24 },
@@ -114,17 +118,41 @@ function defaultOptConstraints(mode: SpeciesMode): OptConstraint[] {
     { key: 'ca_pct', label: 'Ca (%)', enabled: false, min: 0.70, max: 1.10 },
     { key: 'linoleic_pct', label: 'Linoleic (%)', enabled: false, min: 1.0, max: 3.0 },
   ]
-  return [ // ruminant
-    { key: 'me_mj', label: 'ME (MJ/kg)', enabled: true, min: 10.5, max: 13.5 },
-    { key: 'cp_pct', label: 'CP (%)', enabled: true, min: 14, max: 20 },
-    { key: 'ndf_pct', label: 'NDF (%)', enabled: false, min: 25, max: 45 },
-    { key: 'ee_pct', label: 'Fat (%)', enabled: false, min: 2, max: 7 },
+  // ── Ruminant: stage-specific constraints ──
+  const s = stage || ''
+  const isEarlyLact = s.includes('early')
+  const isMidLact = s.includes('mid')
+  const isLateLact = s.includes('late')
+  const isDryFar = s.includes('dry') && s.includes('far')
+  const isDryClose = s.includes('dry') && s.includes('close')
+  const isFinisher = s.includes('finisher')
+  const isGrower = s.includes('grower')
+  const isBeef = isFinisher || isGrower
+
+  let me_min = 10.5, me_max = 13.5
+  let cp_min = 14, cp_max = 20
+  let ndf_min = 25, ndf_max = 45
+  let ee_min = 2, ee_max = 7
+  let starch_min = 15, starch_max = 35
+
+  if (isEarlyLact)      { me_min=11.5; me_max=13.0; cp_min=16.5; cp_max=19.0; ndf_min=28; ndf_max=38; ee_min=3; ee_max=6; starch_min=18; starch_max=30 }
+  else if (isMidLact)   { me_min=11.0; me_max=12.5; cp_min=15.5; cp_max=18.0; ndf_min=30; ndf_max=40; ee_min=3; ee_max=6; starch_min=15; starch_max=28 }
+  else if (isLateLact)  { me_min=10.5; me_max=12.0; cp_min=14.5; cp_max=17.0; ndf_min=32; ndf_max=42; ee_min=2; ee_max=5; starch_min=12; starch_max=25 }
+  else if (isDryFar)    { me_min=8.5;  me_max=10.5; cp_min=12.0; cp_max=15.0; ndf_min=40; ndf_max=55; ee_min=2; ee_max=4; starch_min=5;  starch_max=15 }
+  else if (isDryClose)  { me_min=10.0; me_max=11.5; cp_min=14.0; cp_max=16.0; ndf_min=35; ndf_max=45; ee_min=2; ee_max=5; starch_min=10; starch_max=20 }
+  else if (isFinisher)  { me_min=11.5; me_max=13.5; cp_min=12.0; cp_max=15.0; ndf_min=18; ndf_max=30; ee_min=4; ee_max=8; starch_min=25; starch_max=40 }
+  else if (isGrower)    { me_min=10.5; me_max=12.5; cp_min=13.0; cp_max=16.0; ndf_min=25; ndf_max=40; ee_min=3; ee_max=7; starch_min=20; starch_max=35 }
+
+  return [
+    { key: 'me_mj', label: 'ME (MJ/kg)', enabled: true, min: me_min, max: me_max },
+    { key: 'cp_pct', label: 'CP (%)', enabled: true, min: cp_min, max: cp_max },
+    { key: 'ndf_pct', label: 'NDF (%)', enabled: true, min: ndf_min, max: ndf_max },
+    { key: 'ee_pct', label: 'Fat (%)', enabled: true, min: ee_min, max: ee_max },
     { key: 'ca_pct', label: 'Ca (%)', enabled: false, min: 0.4, max: 1.0 },
     { key: 'p_pct', label: 'P (%)', enabled: false, min: 0.25, max: 0.50 },
-    { key: 'starch_pct', label: 'Starch (%)', enabled: false, min: 15, max: 35 },
+    { key: 'starch_pct', label: 'Starch (%)', enabled: true, min: starch_min, max: starch_max },
   ]
 }
-
 // ── INPUT VALIDATION ─────────────────────────────────────
 interface Warning { type: 'error'|'warning'|'info'; message: string; ingredient?: string }
 
@@ -279,7 +307,7 @@ export default function FormulaBuilderPage() {
   const isMono = isPig || isPoultry // monogastric
 
   useEffect(() => { loadFormula() }, [params.id])
-  useEffect(() => { if (formula) setOptConstraints(defaultOptConstraints(getSpeciesMode(formula.species))) }, [formula?.species])
+  useEffect(() => { if (formula) setOptConstraints(defaultOptConstraints(getSpeciesMode(formula.species), formula.production_stage)) }, [formula?.species, formula?.production_stage])
 
   async function getSupabase() { const { createClient } = await import('@/lib/supabase/client'); return createClient() }
 
