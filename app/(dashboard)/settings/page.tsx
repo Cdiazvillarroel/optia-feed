@@ -17,6 +17,18 @@ const SPECIES_OPTIONS = [
   { key: 'poultry', label: 'Poultry' },
 ]
 
+const CANCEL_REASONS: Record<string, string> = {
+  too_expensive: 'Too expensive for my practice',
+  missing_features: 'Missing features I need',
+  too_complex: 'Too complex or hard to use',
+  switched_competitor: 'Switching to another tool',
+  not_enough_clients: 'Not enough farm clients to justify it',
+  temporary_pause: 'I need a temporary pause (seasonal)',
+  data_quality: 'Ingredient or requirement data quality issues',
+  ai_not_useful: 'AI reviews are not useful enough',
+  other: 'Other reason',
+}
+
 export default function SettingsPage() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -116,7 +128,7 @@ export default function SettingsPage() {
     // Pending cancellation request
     const { data: cr } = await supabase.from('cancellation_requests').select('*').eq('user_id', user.id).eq('status', 'pending').order('created_at', { ascending: false }).limit(1).single()
     if (cr) setPendingCancellation(cr)
-    
+
     // nutritionist_profiles — professional settings
     const { data: np } = await supabase.from('nutritionist_profiles').select('*').eq('id', user.id).single()
     if (np) {
@@ -288,7 +300,7 @@ export default function SettingsPage() {
     loadProfile()
     showSaved('cancellation')
   }
-  
+
   async function handleChangePassword() {
     setPwError('')
     if (newPw.length < 6) { setPwError('Password must be at least 6 characters.'); return }
@@ -619,7 +631,6 @@ export default function SettingsPage() {
           )}
 
           {/* ── SUBSCRIPTION ──────────────────── */}
-          {/* ── SUBSCRIPTION ──────────────────── */}
           {tab === 'subscription' && (
             <div className="flex flex-col gap-4">
               <div className="card p-6">
@@ -692,7 +703,8 @@ export default function SettingsPage() {
                             Submitted on {new Date(pendingCancellation.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.
                           </p>
                           <p className="text-xs text-text-muted mb-2">
-                            <strong className="text-text-dim">Reason:</strong> {{'too_expensive':'Too expensive for my practice','missing_features':'Missing features I need','too_complex':'Too complex or hard to use','switched_competitor':'Switching to another tool','not_enough_clients':'Not enough farm clients to justify it','temporary_pause':'I need a temporary pause (seasonal)','data_quality':'Ingredient or requirement data quality issues','ai_not_useful':'AI reviews aren\'t useful enough','other':'Other reason'}[pendingCancellation.reason] || pendingCancellation.reason}
+                            <strong className="text-text-dim">Reason:</strong> {CANCEL_REASONS[pendingCancellation.reason] || pendingCancellation.reason}
+                          </p>
                           {pendingCancellation.explanation && (
                             <p className="text-xs text-text-muted mb-2">
                               <strong className="text-text-dim">Details:</strong> {pendingCancellation.explanation}
@@ -716,23 +728,13 @@ export default function SettingsPage() {
                       </div>
 
                       <div className="flex flex-col gap-2 mb-4">
-                        {[
-                          { value: 'too_expensive', label: 'Too expensive for my practice' },
-                          { value: 'missing_features', label: 'Missing features I need' },
-                          { value: 'too_complex', label: 'Too complex or hard to use' },
-                          { value: 'switched_competitor', label: 'Switching to another tool' },
-                          { value: 'not_enough_clients', label: 'Not enough farm clients to justify it' },
-                          { value: 'temporary_pause', label: 'I need a temporary pause (seasonal)' },
-                          { value: 'data_quality', label: 'Ingredient or requirement data quality issues' },
-                          { value: 'ai_not_useful', label: 'AI reviews aren\'t useful enough' },
-                          { value: 'other', label: 'Other reason' },
-                        ].map(r => (
-                          <label key={r.value} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${cancelReason === r.value ? 'border-brand bg-brand/5' : 'border-border hover:border-brand/20'}`}>
-                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${cancelReason === r.value ? 'border-brand' : 'border-border'}`}>
-                              {cancelReason === r.value && <div className="w-2 h-2 rounded-full bg-brand" />}
+                        {Object.entries(CANCEL_REASONS).map(([value, label]) => (
+                          <label key={value} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${cancelReason === value ? 'border-brand bg-brand/5' : 'border-border hover:border-brand/20'}`}>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${cancelReason === value ? 'border-brand' : 'border-border'}`}>
+                              {cancelReason === value && <div className="w-2 h-2 rounded-full bg-brand" />}
                             </div>
-                            <input type="radio" name="cancel_reason" value={r.value} checked={cancelReason === r.value} onChange={() => setCancelReason(r.value)} className="hidden" />
-                            <span className="text-sm text-text-dim">{r.label}</span>
+                            <input type="radio" name="cancel_reason" value={value} checked={cancelReason === value} onChange={() => setCancelReason(value)} className="hidden" />
+                            <span className="text-sm text-text-dim">{label}</span>
                           </label>
                         ))}
                       </div>
