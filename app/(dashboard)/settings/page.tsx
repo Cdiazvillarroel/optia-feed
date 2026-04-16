@@ -692,8 +692,7 @@ export default function SettingsPage() {
                             Submitted on {new Date(pendingCancellation.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.
                           </p>
                           <p className="text-xs text-text-muted mb-2">
-                            <strong className="text-text-dim">Reason:</strong> {pendingCancellation.reason}
-                          </p>
+                            <strong className="text-text-dim">Reason:</strong> {{'too_expensive':'Too expensive for my practice','missing_features':'Missing features I need','too_complex':'Too complex or hard to use','switched_competitor':'Switching to another tool','not_enough_clients':'Not enough farm clients to justify it','temporary_pause':'I need a temporary pause (seasonal)','data_quality':'Ingredient or requirement data quality issues','ai_not_useful':'AI reviews aren\'t useful enough','other':'Other reason'}[pendingCancellation.reason] || pendingCancellation.reason}
                           {pendingCancellation.explanation && (
                             <p className="text-xs text-text-muted mb-2">
                               <strong className="text-text-dim">Details:</strong> {pendingCancellation.explanation}
