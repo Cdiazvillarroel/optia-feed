@@ -66,6 +66,12 @@ export default function SettingsPage() {
   // Integrations
   const [feedflowKey, setFeedflowKey] = useState('')
 
+  // Cancellation
+  const [showCancelForm, setShowCancelForm] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelExplanation, setCancelExplanation] = useState('')
+  const [pendingCancellation, setPendingCancellation] = useState<any>(null)
+
   // Password
   const [newPw, setNewPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
@@ -107,6 +113,10 @@ export default function SettingsPage() {
       setDisclaimerAcceptedAt(up.disclaimer_accepted_at || null)
     }
 
+    // Pending cancellation request
+    const { data: cr } = await supabase.from('cancellation_requests').select('*').eq('user_id', user.id).eq('status', 'pending').order('created_at', { ascending: false }).limit(1).single()
+    if (cr) setPendingCancellation(cr)
+    
     // nutritionist_profiles — professional settings
     const { data: np } = await supabase.from('nutritionist_profiles').select('*').eq('id', user.id).single()
     if (np) {
@@ -259,6 +269,26 @@ export default function SettingsPage() {
     setSaving(false)
   }
 
+  async function handleCancellationRequest() {
+    if (!cancelReason) return
+    setSaving(true)
+    const supabase = await getSupabase()
+    await supabase.from('cancellation_requests').insert({
+      user_id: userId,
+      user_email: email,
+      user_name: fullName,
+      subscription_plan: subscriptionPlan,
+      reason: cancelReason,
+      explanation: cancelExplanation.trim() || null,
+    })
+    setSaving(false)
+    setShowCancelForm(false)
+    setCancelReason('')
+    setCancelExplanation('')
+    loadProfile()
+    showSaved('cancellation')
+  }
+  
   async function handleChangePassword() {
     setPwError('')
     if (newPw.length < 6) { setPwError('Password must be at least 6 characters.'); return }
@@ -589,6 +619,7 @@ export default function SettingsPage() {
           )}
 
           {/* ── SUBSCRIPTION ──────────────────── */}
+          {/* ── SUBSCRIPTION ──────────────────── */}
           {tab === 'subscription' && (
             <div className="flex flex-col gap-4">
               <div className="card p-6">
@@ -644,6 +675,92 @@ export default function SettingsPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Cancellation Section */}
+              {(subscriptionStatus === 'active' || subscriptionStatus === 'subscribed_trialing') && (
+                <div className="card p-6 border-border">
+                  <h2 className="text-lg font-bold text-text mb-1">Cancel Subscription</h2>
+                  <p className="text-sm text-text-faint mb-4">We would hate to see you go. If something isn&apos;t working, let us know and our team will reach out within 24 hours.</p>
+
+                  {pendingCancellation ? (
+                    <div className="p-4 bg-status-amber/5 rounded-lg border border-status-amber/20">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle size={18} className="text-status-amber flex-shrink-0 mt-0.5" />
+                        <div>
+                          <div className="text-sm font-bold text-text-dim mb-1">Cancellation request submitted</div>
+                          <p className="text-xs text-text-muted mb-2">
+                            Submitted on {new Date(pendingCancellation.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.
+                          </p>
+                          <p className="text-xs text-text-muted mb-2">
+                            <strong className="text-text-dim">Reason:</strong> {pendingCancellation.reason}
+                          </p>
+                          {pendingCancellation.explanation && (
+                            <p className="text-xs text-text-muted mb-2">
+                              <strong className="text-text-dim">Details:</strong> {pendingCancellation.explanation}
+                            </p>
+                          )}
+                          <p className="text-xs text-text-ghost">
+                            Our customer care team will contact you within 24 hours to discuss your options. Your subscription remains active until then.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : !showCancelForm ? (
+                    <button onClick={() => setShowCancelForm(true)} className="btn btn-ghost btn-sm text-status-red border border-status-red/20 hover:bg-status-red/5">
+                      Request Cancellation
+                    </button>
+                  ) : (
+                    <div className="p-5 bg-surface-bg rounded-lg border border-border">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="text-sm font-bold text-text-dim">Tell us why you&apos;re leaving</div>
+                        <button onClick={() => setShowCancelForm(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={16} /></button>
+                      </div>
+
+                      <div className="flex flex-col gap-2 mb-4">
+                        {[
+                          { value: 'too_expensive', label: 'Too expensive for my practice' },
+                          { value: 'missing_features', label: 'Missing features I need' },
+                          { value: 'too_complex', label: 'Too complex or hard to use' },
+                          { value: 'switched_competitor', label: 'Switching to another tool' },
+                          { value: 'not_enough_clients', label: 'Not enough farm clients to justify it' },
+                          { value: 'temporary_pause', label: 'I need a temporary pause (seasonal)' },
+                          { value: 'data_quality', label: 'Ingredient or requirement data quality issues' },
+                          { value: 'ai_not_useful', label: 'AI reviews aren\'t useful enough' },
+                          { value: 'other', label: 'Other reason' },
+                        ].map(r => (
+                          <label key={r.value} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${cancelReason === r.value ? 'border-brand bg-brand/5' : 'border-border hover:border-brand/20'}`}>
+                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${cancelReason === r.value ? 'border-brand' : 'border-border'}`}>
+                              {cancelReason === r.value && <div className="w-2 h-2 rounded-full bg-brand" />}
+                            </div>
+                            <input type="radio" name="cancel_reason" value={r.value} checked={cancelReason === r.value} onChange={() => setCancelReason(r.value)} className="hidden" />
+                            <span className="text-sm text-text-dim">{r.label}</span>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="mb-4">
+                        <label className="text-xs font-semibold text-text-muted block mb-1">Anything else you&apos;d like us to know? (optional)</label>
+                        <textarea value={cancelExplanation} onChange={e => setCancelExplanation(e.target.value)} className="input" rows={3}
+                          placeholder="Help us understand what we could do better, or what would make you stay..." />
+                      </div>
+
+                      <div className="flex items-start gap-2 p-3 mb-4 bg-brand/5 rounded-lg border border-brand/20">
+                        <CheckCircle size={14} className="text-brand flex-shrink-0 mt-0.5" />
+                        <p className="text-xs text-text-muted">
+                          Your subscription stays active while we review your request. Our customer care team will reach out within <strong className="text-text-dim">24 hours</strong> to discuss options — including potential discounts, plan changes, or a temporary pause.
+                        </p>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowCancelForm(false)} className="btn btn-ghost flex-1 justify-center">Keep my subscription</button>
+                        <button onClick={handleCancellationRequest} disabled={saving || !cancelReason} className="btn btn-sm flex-1 justify-center bg-status-red text-white border-none hover:bg-status-red/80 cursor-pointer disabled:opacity-50">
+                          {saving ? 'Submitting...' : 'Submit cancellation request'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
