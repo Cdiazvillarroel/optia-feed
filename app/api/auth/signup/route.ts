@@ -30,7 +30,7 @@ interface SignupBody {
   fullName: string
   email: string
   password: string
-  phone?: string
+  phone: string
   company: string
   species: string[]
   clientRange?: string
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
     if (!body.fullName?.trim()) errors.fullName = 'Full name is required'
     if (!body.email?.trim()) errors.email = 'Email is required'
     if (!body.password || body.password.length < 8) errors.password = 'Password must be at least 8 characters'
+    if (!body.phone?.trim() || body.phone.trim().length < 6) errors.phone = 'A valid phone number is required'
     if (!body.company?.trim()) errors.company = 'Company name is required'
     if (!body.species?.length) errors.species = 'Select at least one species'
 
@@ -100,7 +101,7 @@ export async function POST(req: NextRequest) {
       user_metadata: {
         full_name: body.fullName,
         company: body.company,
-        phone: body.phone || null,
+        phone: body.phone.trim(),
       }
     })
 
