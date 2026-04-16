@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
           plan,
         },
       },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?subscribed=true`,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/workspace?subscribed=true`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/subscribe?cancelled=true`,
       allow_promotion_codes: true,
       billing_address_collection: 'auto',
