@@ -144,21 +144,17 @@ export default function CommunityPage() {
 
   async function toggleVote(postId: string) {
     const supabase = await getSupabase()
+    const post = posts.find(p => p.id === postId)
     if (myVotes.has(postId)) {
       await supabase.from('community_votes').delete().eq('post_id', postId).eq('user_id', userId)
-      await supabase.rpc('decrement_vote', { post_id: postId }).catch(() => {
-        // Fallback if RPC doesn't exist
-        supabase.from('community_posts').update({ vote_count: Math.max(0, (posts.find(p => p.id === postId)?.vote_count || 1) - 1) }).eq('id', postId)
-      })
+      await supabase.from('community_posts').update({ vote_count: Math.max(0, (post?.vote_count || 1) - 1) }).eq('id', postId)
     } else {
       await supabase.from('community_votes').insert({ post_id: postId, user_id: userId })
-      await supabase.rpc('increment_vote', { post_id: postId }).catch(() => {
-        supabase.from('community_posts').update({ vote_count: (posts.find(p => p.id === postId)?.vote_count || 0) + 1 }).eq('id', postId)
-      })
+      await supabase.from('community_posts').update({ vote_count: (post?.vote_count || 0) + 1 }).eq('id', postId)
     }
     loadData()
   }
-
+  
   async function loadComments(postId: string) {
     const supabase = await getSupabase()
     const { data } = await supabase.from('community_comments').select('*').eq('post_id', postId).order('created_at')
