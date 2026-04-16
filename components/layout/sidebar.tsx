@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   Home, Users, ClipboardList, Tag, Database, Package, FlaskConical, Radio,
-  BarChart3, Settings, Sparkles
+  BarChart3, Globe, Settings, Sparkles
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAiStore } from '@/lib/utils/store'
@@ -19,6 +19,7 @@ const navItems = [
   { href: '/formulas', label: 'Formulas', icon: FlaskConical },
   { href: '/hub', label: 'Hub', icon: Radio },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
+  { href: '/community', label: 'Community', icon: Globe },
 ]
 
 interface SidebarProps {
