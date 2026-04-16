@@ -5,11 +5,7 @@ import { Shield, ChevronRight } from 'lucide-react'
 
 interface Requirement { nutrient: string; unit: string; min: number|null; max: number|null; target: number; critical_max?: number|null; critical_min?: number|null }
 interface Ratio { name: string; min: number; max: number; target: number; unit?: string }
-interface StageData {
-  id: string; species: string; production_stage: string; stage_name: string; stage_description: string;
-  requirements: Requirement[]; ratios: Ratio[];
-  breed: string | null; production_level: string | null
-}
+interface StageData { id: string; species: string; production_stage: string; stage_name: string; stage_description: string; requirements: Requirement[]; ratios: Ratio[] }
 interface SafetyRule { id: string; species: string; severity: string; title: string; description: string; detail: string; ingredient_name: string|null }
 
 const SPECIES_LIST = [
@@ -19,25 +15,6 @@ const SPECIES_LIST = [
   { key: 'poultry', name: 'Poultry', emoji: '🐔', color: '#D4A843' },
   { key: 'sheep', name: 'Sheep', emoji: '🐑', color: '#7BA0C4' },
 ]
-
-// Reusable breed + production_level badge
-function BreedBadge({ breed, level, size = 'sm' }: { breed: string|null, level: string|null, size?: 'sm'|'xs' }) {
-  if (!breed && !level) return null
-  const cls = size === 'xs' ? 'text-[10px] px-1.5 py-0.5' : 'text-2xs px-2 py-0.5'
-  return (
-    <span className={`inline-flex items-center gap-1 ${cls} rounded bg-brand/10 text-brand font-semibold`}>
-      {breed && <span>{breed}</span>}
-      {breed && level && <span className="opacity-50">·</span>}
-      {level && <span className="uppercase tracking-wider opacity-80">{level}</span>}
-    </span>
-  )
-}
-
-// Build display title with breed suffix
-function stageDisplayName(s: StageData) {
-  if (s.breed) return `${s.stage_name} · ${s.breed}`
-  return s.stage_name
-}
 
 export default function AnimalsPage() {
   const [species, setSpecies] = useState('beef')
@@ -59,7 +36,6 @@ export default function AnimalsPage() {
       .eq('species', sp)
       .is('nutritionist_id', null)
       .order('production_stage')
-      .order('breed', { nullsFirst: true })
     const { data: safetyRules } = await supabase
       .from('safety_rules')
       .select('*')
@@ -130,17 +106,8 @@ export default function AnimalsPage() {
                   <div key={s.id} onClick={() => setSelectedStage(s)}
                     className={`bg-surface-card rounded-lg p-3 border cursor-pointer transition-all
                       ${selectedStage?.id === s.id ? 'border-brand bg-brand/5' : 'border-border hover:border-white/10'}`}>
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <div className="text-sm font-bold text-text-dim flex-1">{s.stage_name}</div>
-                    </div>
-                    {(s.breed || s.production_level) && (
-                      <div className="mb-1.5">
-                        <BreedBadge breed={s.breed} level={s.production_level} size="xs" />
-                      </div>
-                    )}
-                    {s.stage_description && (
-                      <div className="text-2xs text-text-ghost line-clamp-2">{s.stage_description?.replace('DAIRY | ','')}</div>
-                    )}
+                    <div className="text-sm font-bold text-text-dim">{s.stage_name}</div>
+                    <div className="text-2xs text-text-ghost mt-0.5 line-clamp-2">{s.stage_description?.replace('DAIRY | ','')}</div>
                   </div>
                 ))}
               </div>
@@ -149,11 +116,7 @@ export default function AnimalsPage() {
                 <>
                   {/* Requirements table */}
                   <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                    <span>Nutrient Requirements — {selectedStage.stage_name}</span>
-                    {(selectedStage.breed || selectedStage.production_level) && (
-                      <BreedBadge breed={selectedStage.breed} level={selectedStage.production_level} />
-                    )}
-                    <span className="flex-1 h-px bg-border" />
+                    Nutrient Requirements — {selectedStage.stage_name}<span className="flex-1 h-px bg-border" />
                   </div>
                   <div className="card mb-5">
                     <table className="w-full border-collapse">
@@ -214,7 +177,6 @@ export default function AnimalsPage() {
                     <table className="w-full border-collapse">
                       <thead><tr className="border-b border-border">
                         <th className="px-4 py-2.5 text-left text-2xs font-bold text-text-ghost uppercase">Stage</th>
-                        <th className="px-3 py-2.5 text-left text-2xs font-bold text-text-ghost uppercase">Variant</th>
                         <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">CP %</th>
                         <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Energy</th>
                         <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Ca %</th>
@@ -230,11 +192,6 @@ export default function AnimalsPage() {
                             <tr key={s.id} onClick={() => setSelectedStage(s)}
                               className={`border-b border-border/5 cursor-pointer hover:bg-[#253442] ${selectedStage?.id===s.id?'bg-brand/5':''}`}>
                               <td className={`px-4 py-2 text-sm font-semibold ${selectedStage?.id===s.id?'text-brand':'text-text-dim'}`}>{s.stage_name}</td>
-                              <td className="px-3 py-2 text-sm">
-                                {(s.breed || s.production_level)
-                                  ? <BreedBadge breed={s.breed} level={s.production_level} size="xs" />
-                                  : <span className="text-text-ghost text-2xs">Generic</span>}
-                              </td>
                               <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{cp ? `${cp.min}–${cp.max}` : '—'}</td>
                               <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{me ? `${me.target} ${me.unit}` : '—'}</td>
                               <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{ca?.target ?? '—'}</td>
@@ -306,18 +263,11 @@ export default function AnimalsPage() {
                 {stages.map((s) => (
                   <div key={s.id} className="card p-4 cursor-pointer hover:border-brand/25 transition-colors"
                     onClick={() => { setSelectedStage(s); setTab('requirements') }}>
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-sm font-bold text-text-dim flex-1">{s.stage_name}</span>
-                      <span className="text-2xs text-text-ghost font-mono whitespace-nowrap">{s.requirements.length} nutrients</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-bold text-text-dim">{s.stage_name}</span>
+                      <span className="text-2xs text-text-ghost font-mono">{s.requirements.length} nutrients</span>
                     </div>
-                    {(s.breed || s.production_level) && (
-                      <div className="mb-1.5">
-                        <BreedBadge breed={s.breed} level={s.production_level} size="xs" />
-                      </div>
-                    )}
-                    {s.stage_description && (
-                      <p className="text-xs text-text-faint mb-2 line-clamp-2">{s.stage_description?.replace('DAIRY | ','')}</p>
-                    )}
+                    <p className="text-xs text-text-faint mb-2 line-clamp-2">{s.stage_description?.replace('DAIRY | ','')}</p>
                     <div className="flex gap-1.5 flex-wrap">
                       {s.requirements.slice(0,3).map((r,i) => (
                         <span key={i} className="text-2xs px-2 py-0.5 rounded bg-surface-bg text-text-muted font-mono">
