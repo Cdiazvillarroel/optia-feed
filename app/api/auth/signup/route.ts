@@ -2,8 +2,10 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
+import crypto from 'crypto'
 import { seedUserData } from '@/lib/seed-user-data'
-import { renderWelcomeEmail } from '@/emails/welcome'
+import { isDisposableEmail } from '@/lib/disposable-emails'
+import { renderVerificationEmail } from '@/emails/verification'
 
 const ALLOWED_ORIGINS = [
   'https://optiafeed.cloud',
@@ -28,6 +30,7 @@ interface SignupBody {
   fullName: string
   email: string
   password: string
+  phone?: string
   company: string
   species: string[]
   clientRange?: string
@@ -63,28 +66,41 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const normalizedEmail = body.email.toLowerCase().trim()
+
+    // ── Bloquear dominios descartables ──────────
+    if (isDisposableEmail(normalizedEmail)) {
+      return NextResponse.json(
+        { error: 'Please use a valid business email address. Disposable email services are not allowed.' },
+        { status: 400, headers }
+      )
+    }
+
     // ── Verificar si el email ya existe ─────────
     const { data: existing } = await supabaseAdmin
       .from('user_profiles')
-      .select('id')
-      .eq('email', body.email.toLowerCase())
+      .select('id, email_verified')
+      .eq('email', normalizedEmail)
       .single()
 
     if (existing) {
+      // Si existe pero no verificó, podría ser un retry — igual devolvemos el mismo error
+      // para no revelar info, pero podrías en el futuro permitir un "resend" aquí.
       return NextResponse.json(
         { error: 'An account with this email already exists' },
         { status: 409, headers }
       )
     }
 
-    // ── Crear usuario en Auth ───────────────────
+    // ── Crear usuario en Auth (SIN confirmar email) ──
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: body.email.toLowerCase(),
+      email: normalizedEmail,
       password: body.password,
-      email_confirm: true,
+      email_confirm: false, // ← CAMBIO: ahora requiere verificación
       user_metadata: {
         full_name: body.fullName,
         company: body.company,
+        phone: body.phone || null,
       }
     })
 
@@ -97,21 +113,21 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = authData.user.id
-    const trialExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
 
-    // ── Crear perfil ────────────────────────────
+    // ── Crear perfil (pendiente de verificación, trial aún no arranca) ──
     const { error: profileError } = await supabaseAdmin
       .from('user_profiles')
       .insert({
         id: userId,
         full_name: body.fullName.trim(),
-        email: body.email.toLowerCase(),
+        email: normalizedEmail,
         company: body.company.trim(),
         species: body.species,
         client_range: body.clientRange || null,
         referral: body.referral || null,
-        subscription_status: 'trialing',
-        trial_expires_at: trialExpiresAt.toISOString(),
+        subscription_status: 'pending_verification', // ← CAMBIO: no arranca como 'trialing'
+        trial_expires_at: null, // ← CAMBIO: se setea al verificar
+        email_verified: false,
       })
 
     if (profileError) {
@@ -123,11 +139,56 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Seedear datos según especie ─────────────
+    // ── Seedear datos según especie (se mantiene) ──
     try {
       await seedUserData(supabaseAdmin, userId, body.species)
     } catch (seedError) {
       console.error('Data seeding failed (non-fatal):', seedError)
+    }
+
+    // ── Crear token de verificación ─────────────
+    const token = crypto.randomBytes(32).toString('hex')
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24h
+
+    const { error: tokenError } = await supabaseAdmin
+      .from('email_verifications')
+      .insert({
+        user_id: userId,
+        email: normalizedEmail,
+        token,
+        expires_at: expiresAt.toISOString(),
+      })
+
+    if (tokenError) {
+      // Rollback todo
+      await supabaseAdmin.from('user_profiles').delete().eq('id', userId)
+      await supabaseAdmin.auth.admin.deleteUser(userId)
+      console.error('Token creation failed:', tokenError)
+      return NextResponse.json(
+        { error: 'Failed to generate verification token' },
+        { status: 500, headers }
+      )
+    }
+
+    // ── Enviar verification email ───────────────
+    const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/verify?token=${token}`
+
+    try {
+      if (resend) {
+        await resend.emails.send({
+          from: 'Optia Feed <hello@optiafeed.cloud>',
+          to: normalizedEmail,
+          subject: 'Verify your email to activate your free trial',
+          html: renderVerificationEmail({
+            name: body.fullName.split(' ')[0],
+            verifyUrl,
+            expiresInHours: 24,
+          }),
+        })
+      }
+    } catch (emailError) {
+      console.error('Verification email send failed:', emailError)
+      // No hacemos rollback — el user puede usar "Resend" desde la landing
     }
 
     // ── Log del evento ──────────────────────────
@@ -141,37 +202,17 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    // ── Enviar welcome email ────────────────────
-    try {
-      if (resend) {
-        await resend.emails.send({
-          from: 'Optia Feed <hello@optiafeed.cloud>',
-          to: body.email,
-          subject: 'Welcome to Optia Feed — Your 24-hour trial is active',
-          html: renderWelcomeEmail({
-            name: body.fullName.split(' ')[0],
-            species: body.species,
-            trialExpiresAt,
-            loginUrl: `${process.env.NEXT_PUBLIC_APP_URL}/login`,
-          }),
-        })
+    await supabaseAdmin.from('onboarding_events').insert({
+      user_id: userId,
+      event_type: 'verification_email_sent',
+    })
 
-        await supabaseAdmin
-          .from('user_profiles')
-          .update({ welcome_email_sent: true })
-          .eq('id', userId)
-      }
-    } catch (emailError) {
-      console.error('Welcome email failed (non-fatal):', emailError)
-    }
-
-    // ── Respuesta exitosa ───────────────────────
+    // ── Respuesta ───────────────────────────────
     return NextResponse.json(
       {
         success: true,
-        userId,
-        trialExpiresAt: trialExpiresAt.toISOString(),
-        loginUrl: `${process.env.NEXT_PUBLIC_APP_URL}/login`,
+        message: 'verification_sent',
+        email: normalizedEmail,
       },
       { status: 200, headers }
     )
