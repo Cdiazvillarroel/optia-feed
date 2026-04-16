@@ -9,11 +9,11 @@ interface StageData { id: string; species: string; production_stage: string; sta
 interface SafetyRule { id: string; species: string; severity: string; title: string; description: string; detail: string; ingredient_name: string|null }
 
 const SPECIES_LIST = [
-  { key: 'cattle', name: 'Dairy Cattle', emoji: '\uD83D\uDC04', color: '#4CAF7D' },
-  { key: 'beef', name: 'Beef Cattle', emoji: '\uD83D\uDC02', color: '#8B6914' },
-  { key: 'pig', name: 'Pigs', emoji: '\uD83D\uDC37', color: '#E88B6E' },
-  { key: 'poultry', name: 'Poultry', emoji: '\uD83D\uDC14', color: '#D4A843' },
-  { key: 'sheep', name: 'Sheep', emoji: '\uD83D\uDC11', color: '#7BA0C4' },
+  { key: 'cattle', name: 'Dairy Cattle', emoji: '🐄', color: '#4CAF7D' },
+  { key: 'beef', name: 'Beef Cattle', emoji: '🐂', color: '#8B6914' },
+  { key: 'pig', name: 'Pigs', emoji: '🐷', color: '#E88B6E' },
+  { key: 'poultry', name: 'Poultry', emoji: '🐔', color: '#D4A843' },
+  { key: 'sheep', name: 'Sheep', emoji: '🐑', color: '#7BA0C4' },
 ]
 
 export default function AnimalsPage() {
@@ -72,7 +72,7 @@ export default function AnimalsPage() {
             <div className="text-2xl mb-2">{s.emoji}</div>
             <div className="text-sm font-bold text-text-dim">{s.name}</div>
             <div className="text-2xs text-text-ghost mt-0.5">
-              {species === s.key && !loading ? `${stages.length} stages \u00B7 ${rules.length} rules` : 'Click to view'}
+              {species === s.key && !loading ? `${stages.length} stages · ${rules.length} rules` : 'Click to view'}
             </div>
           </div>
         ))}
@@ -116,7 +116,7 @@ export default function AnimalsPage() {
                 <>
                   {/* Requirements table */}
                   <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                    Nutrient Requirements \u2014 {selectedStage.stage_name}<span className="flex-1 h-px bg-border" />
+                    Nutrient Requirements — {selectedStage.stage_name}<span className="flex-1 h-px bg-border" />
                   </div>
                   <div className="card mb-5">
                     <table className="w-full border-collapse">
@@ -135,13 +135,13 @@ export default function AnimalsPage() {
                           <tr key={i} className="border-b border-border/5 hover:bg-[#253442]">
                             <td className="px-4 py-2 text-sm font-semibold text-text-dim">{r.nutrient}</td>
                             <td className="px-3 py-2 text-center text-sm text-text-ghost">{r.unit}</td>
-                            <td className="px-3 py-2 text-center text-sm font-mono text-status-blue">{r.min ?? '\u2014'}</td>
+                            <td className="px-3 py-2 text-center text-sm font-mono text-status-blue">{r.min ?? '—'}</td>
                             <td className="px-3 py-2 text-center text-sm font-mono text-brand font-bold">{r.target}</td>
-                            <td className="px-3 py-2 text-center text-sm font-mono text-status-coral">{r.max ?? '\u2014'}</td>
+                            <td className="px-3 py-2 text-center text-sm font-mono text-status-coral">{r.max ?? '—'}</td>
                             <td className="px-3 py-2 text-center text-sm font-mono">
                               {r.critical_max != null ? <span className="text-status-red font-bold">&gt;{r.critical_max}</span> :
                                r.critical_min != null ? <span className="text-status-red font-bold">&lt;{r.critical_min}</span> :
-                               <span className="text-text-ghost">\u2014</span>}
+                               <span className="text-text-ghost">—</span>}
                             </td>
                           </tr>
                         ))}
@@ -161,7 +161,7 @@ export default function AnimalsPage() {
                             <div className="text-xs text-text-ghost font-semibold uppercase tracking-wider mb-1">{r.name}{r.unit ? ` (${r.unit})` : ''}</div>
                             <div className="flex items-baseline gap-3">
                               <span className="text-2xl font-bold font-mono text-brand">{r.target}</span>
-                              <span className="text-xs font-mono text-text-ghost">range: {r.min} \u2013 {r.max}</span>
+                              <span className="text-xs font-mono text-text-ghost">range: {r.min} – {r.max}</span>
                             </div>
                           </div>
                         ))}
@@ -192,10 +192,10 @@ export default function AnimalsPage() {
                             <tr key={s.id} onClick={() => setSelectedStage(s)}
                               className={`border-b border-border/5 cursor-pointer hover:bg-[#253442] ${selectedStage?.id===s.id?'bg-brand/5':''}`}>
                               <td className={`px-4 py-2 text-sm font-semibold ${selectedStage?.id===s.id?'text-brand':'text-text-dim'}`}>{s.stage_name}</td>
-                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{cp ? `${cp.min}\u2013${cp.max}` : '\u2014'}</td>
-                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{me ? `${me.target} ${me.unit}` : '\u2014'}</td>
-                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{ca?.target ?? '\u2014'}</td>
-                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{p?.target ?? '\u2014'}</td>
+                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{cp ? `${cp.min}–${cp.max}` : '—'}</td>
+                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{me ? `${me.target} ${me.unit}` : '—'}</td>
+                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{ca?.target ?? '—'}</td>
+                              <td className="px-3 py-2 text-center text-sm font-mono text-text-dim">{p?.target ?? '—'}</td>
                             </tr>
                           )
                         })}
@@ -213,7 +213,7 @@ export default function AnimalsPage() {
               {['danger','warning','info'].map((sev) => {
                 const filtered = rules.filter(r => r.severity === sev)
                 if (!filtered.length) return null
-                const label = sev === 'danger' ? '\uD83D\uDEAB Critical \u2014 Do Not Exceed' : sev === 'warning' ? '\u26A0\uFE0F Warnings \u2014 Monitor Closely' : '\u2139\uFE0F Guidelines \u2014 Best Practice'
+                const label = sev === 'danger' ? '🚫 Critical — Do Not Exceed' : sev === 'warning' ? '⚠️ Warnings — Monitor Closely' : 'ℹ️ Guidelines — Best Practice'
                 const color = sev === 'danger' ? 'text-status-red' : sev === 'warning' ? 'text-status-amber' : 'text-status-blue'
                 return (
                   <div key={sev} className="mb-5">
@@ -257,7 +257,7 @@ export default function AnimalsPage() {
               </div>
 
               <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                All Stages \u2014 {spData?.name}<span className="flex-1 h-px bg-border" />
+                All Stages — {spData?.name}<span className="flex-1 h-px bg-border" />
               </div>
               <div className="grid grid-cols-2 gap-3 mb-6">
                 {stages.map((s) => (
@@ -282,7 +282,7 @@ export default function AnimalsPage() {
 
               <div className="card p-4">
                 <p className="text-sm text-text-muted leading-relaxed">
-                  Requirements based on <strong className="text-text-dim">CSIRO Feeding Standards for Australian Livestock</strong> and <strong className="text-text-dim">NRC Nutrient Requirements</strong>. Values represent typical ranges \u2014 adjust based on genetics, environment, and production targets.
+                  Requirements based on <strong className="text-text-dim">CSIRO Feeding Standards for Australian Livestock</strong> and <strong className="text-text-dim">NRC Nutrient Requirements</strong>. Values represent typical ranges — adjust based on genetics, environment, and production targets.
                 </p>
               </div>
             </>
