@@ -10,6 +10,8 @@ export default function ReportsPage() {
   const [animals, setAnimals] = useState<any[]>([])
   const [prices, setPrices] = useState<Record<string,number>>({})
   const [profileName, setProfileName] = useState('')
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false)
+  const [disclaimerAcceptedAt, setDisclaimerAcceptedAt] = useState<string | null>(null)
   const [showReport, setShowReport] = useState<string|null>(null)
   const [selectedFormula, setSelectedFormula] = useState('')
   const [selectedClient, setSelectedClient] = useState('')
@@ -23,8 +25,15 @@ export default function ReportsPage() {
     const supabase = await getSupabase()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const { data: profile } = await supabase.from('nutritionist_profiles').select('*').eq('id', user.id).single()
-    if (profile) setProfileName(profile.full_name || profile.business_name || '')
+
+    // user_profiles → single source of truth
+    const { data: profile } = await supabase.from('user_profiles').select('*').eq('id', user.id).single()
+    if (profile) {
+      setProfileName(profile.full_name || profile.company || '')
+      setDisclaimerAccepted(profile.disclaimer_accepted === true)
+      setDisclaimerAcceptedAt(profile.disclaimer_accepted_at || null)
+    }
+
     const { data: f } = await supabase.from('formulas').select('*, client:nutrition_clients(name, location, contact_name)').not('status','eq','archived').order('name')
     setFormulas(f || [])
     const { data: c } = await supabase.from('nutrition_clients').select('*').eq('active', true).order('name')
@@ -68,14 +77,41 @@ export default function ReportsPage() {
     .footer{margin-top:32px;padding-top:16px;border-top:1px solid #E6DDD0;display:flex;justify-content:space-between;align-items:center}
     .footer-logo{display:flex;align-items:center;gap:8px}
     .footer-text{font-size:10px;color:#A69D93}
-    .disclaimer{font-size:9px;color:#C2B6A6;margin-top:10px;line-height:1.6;font-style:italic}
     .btn-print{display:inline-block;padding:10px 24px;background:#BE5529;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:20px}
     .btn-print:hover{background:#D4683F}
     .section-card{background:#F4EFE9;border-radius:8px;padding:14px;margin-bottom:12px;border:1px solid #E6DDD0}
-    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}`
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+    /* ── DISCLAIMER BLOCK ────────────────────────────────── */
+    .disclaimer-block{margin-top:20px;padding:18px;border-radius:8px;border:1px solid #E6DDD0;background:#FDFBF8;page-break-inside:avoid}
+    .disclaimer-block .disc-title{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#BE5529;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+    .disclaimer-block .disc-text{font-size:10px;color:#5A5149;line-height:1.6;text-align:justify}
+    .disclaimer-block .disc-text p{margin-bottom:6px}
+    .disclaimer-block .disc-text ul{margin:4px 0 6px 18px;padding:0}
+    .disclaimer-block .disc-text li{margin-bottom:2px}
+    .disclaimer-block .disc-text strong{color:#2C2420}
+    .disclaimer-block .disc-status{margin-top:10px;padding:8px 12px;border-radius:6px;font-size:10px;font-weight:600;display:flex;align-items:center;gap:6px}
+    .disclaimer-block .disc-status.accepted{background:#E8F5E9;color:#2E6B42}
+    .disclaimer-block .disc-status.not-accepted{background:#FFF3E0;color:#C9A043;border:1px solid #C9A043}
+
+    /* Cover watermark when disclaimer was NOT accepted */
+    .not-accepted-banner{background:#FFF3E0;border:2px solid #C9A043;border-radius:8px;padding:10px 14px;margin-bottom:20px;display:flex;align-items:flex-start;gap:10px}
+    .not-accepted-banner .icon{font-size:18px;color:#C9A043}
+    .not-accepted-banner .content{flex:1}
+    .not-accepted-banner .content .t{font-size:11px;font-weight:700;color:#C9A043;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
+    .not-accepted-banner .content .d{font-size:11px;color:#5A5149;line-height:1.4}`
   }
 
   function headerHTML(title: string, subtitle: string) {
+    const banner = !disclaimerAccepted ? `
+      <div class="not-accepted-banner">
+        <span class="icon">&#9888;</span>
+        <div class="content">
+          <div class="t">Disclaimer not acknowledged</div>
+          <div class="d">The nutritionist using this platform has not confirmed acceptance of the professional-use disclaimer. See the disclaimer section at the end of this report.</div>
+        </div>
+      </div>` : ''
+
     return `<button class="btn-print no-print" onclick="window.print()">Download PDF (Ctrl+P)</button>
     <div class="header">
       <div class="header-bar">
@@ -86,15 +122,42 @@ export default function ReportsPage() {
         <h1>${subtitle}</h1>
         <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:#5A5149"><span>${date}</span>${profileName?`<span>&middot; ${profileName}</span>`:''}</div>
       </div>
-    </div>`
+    </div>
+    ${banner}`
   }
 
   function footerHTML() {
+    const acceptedDate = disclaimerAcceptedAt ? new Date(disclaimerAcceptedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+
+    const statusBlock = disclaimerAccepted
+      ? `<div class="disc-status accepted">&#10003; Disclaimer accepted by ${profileName || 'user'}${acceptedDate ? ' on ' + acceptedDate : ''}.</div>`
+      : `<div class="disc-status not-accepted">&#9888; Disclaimer <strong>not</strong> acknowledged by ${profileName || 'user'} at time of report generation.</div>`
+
+    const disclaimerBlock = `
+      <div class="disclaimer-block">
+        <div class="disc-title">&#9888; Professional-use disclaimer</div>
+        <div class="disc-text">
+          <p><strong>Optia Feed is a decision-support tool</strong> designed to assist qualified animal nutritionists and livestock professionals in formulating diets, analysing nutrient requirements, and managing client data.</p>
+          <p>All formulations, nutrient calculations, AI-generated reviews, and recommendations produced by this platform are <strong>informational aids only</strong>. They do not replace, substitute, override, or in any way diminish the professional judgment, expertise, or final responsibility of the user.</p>
+          <p><strong>The user — as a qualified nutritionist or veterinary professional — retains full responsibility for:</strong></p>
+          <ul>
+            <li>Validating all inputs, ingredient compositions, and ingredient prices</li>
+            <li>Reviewing all outputs before applying them in the field</li>
+            <li>Independently verifying nutritional requirements for the specific animals, conditions, and management system</li>
+            <li>Ensuring compliance with local regulations, veterinary guidelines, and animal welfare standards</li>
+            <li>Any decisions, recommendations, or outcomes resulting from the use of this platform</li>
+          </ul>
+          <p>Optia Feed, its developers, Agrometrics, and affiliated entities accept no liability for animal health outcomes, production losses, regulatory non-compliance, or financial consequences arising from the use of formulations, reports, or analyses generated through this platform.</p>
+          <p>Nutritional models (AFRC, NRC, CNCPS) reference published scientific standards but may not reflect the most recent updates. Requirement profiles are starting points and must be adjusted for local conditions, breed-specific performance, and individual farm context.</p>
+        </div>
+        ${statusBlock}
+      </div>`
+
     return `<div class="footer">
       <div class="footer-logo">${logoSVGTiny}<span class="footer-text" style="font-weight:600;color:#2C2420">Optia Feed</span><span class="footer-text">by Agrometrics</span></div>
       <span class="footer-text">${date}</span>
     </div>
-    <div class="disclaimer">This report is generated for professional use by qualified nutritionists. The nutritionist is responsible for verifying all values. Optia Feed is a decision-support tool — AI-powered, field-proven.</div>`
+    ${disclaimerBlock}`
   }
 
   // ── FORMULA REPORT ─────────────────────────────────────
@@ -247,6 +310,17 @@ export default function ReportsPage() {
     <div className="p-7 max-w-[1000px]">
       <h1 className="text-2xl font-bold text-text mb-1">Reports</h1>
       <p className="text-base text-text-faint mb-5">Generate professional PDF reports for clients, formulas, and audits.</p>
+
+      {!disclaimerAccepted && (
+        <div className="flex items-start gap-3 p-3.5 mb-5 rounded-lg bg-status-amber/5 border border-status-amber/25">
+          <div className="text-status-amber text-lg leading-none">&#9888;</div>
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-status-amber mb-0.5">Disclaimer not accepted</div>
+            <div className="text-xs text-text-muted leading-relaxed">You haven&apos;t accepted the professional-use disclaimer. Exported reports will include a notice indicating this. You can accept the disclaimer at any time from the welcome wizard or Settings.</div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3.5">
         {reports.map(r => (
           <div key={r.key} onClick={() => { setShowReport(r.key); setSelectedFormula(''); setSelectedClient('') }}
@@ -300,7 +374,7 @@ export default function ReportsPage() {
               </div>
             )}
 
-            <p className="text-xs text-text-ghost mb-4">The report will open in a new window. Use <strong className="text-text-muted">Ctrl+P</strong> (or Cmd+P) to save as PDF.</p>
+            <p className="text-xs text-text-ghost mb-4">The report will open in a new window. Use <strong className="text-text-muted">Ctrl+P</strong> (or Cmd+P) to save as PDF. <strong>Every report includes the full professional-use disclaimer.</strong></p>
 
             <div className="flex gap-2">
               <button onClick={() => setShowReport(null)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
