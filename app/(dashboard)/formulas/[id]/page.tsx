@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Plus, Sparkles, Save, Lock, Unlock, X, Search, ChevronDown, ChevronUp, Loader2, ToggleLeft, ToggleRight, Zap, GitCompare, RotateCcw, Download, Shield } from 'lucide-react'
 import ProfileEditorModal from '@/components/ProfileEditorModal'
+import { runOptimizer as runOptimizerLP } from '@/lib/optimizer'
 interface Req { nutrient: string; unit: string; min: number|null; max: number|null; target: number; critical_max?: number|null; critical_min?: number|null }
 interface Ratio { name: string; min: number; max: number; target: number; unit?: string }
 interface CompareSlot { name: string; ings: any[]; production: Record<string,string>; nutrients: Record<string,number>; cost: number; margin: number; mp: number; fc: string; timestamp: Date }
@@ -76,22 +77,9 @@ function calculateMPDemand(species: string, prod: Record<string,string>): number
 function estimateMethane(me: number, dmi: number) { if (dmi <= 0 || me <= 0) return { ch4_g: 0, ch4_int: 0 }; const gei = dmi * me / 0.60; const mj = 0.065 * gei; return { ch4_g: mj / 0.0556, ch4_int: mj / 0.0556 / dmi } }
 
 // ── OPTIMIZER ────────────────────────────────────────────
+// Solver moved to lib/optimizer (LP with heuristic fallback)
 interface OptConstraint { key: string; label: string; enabled: boolean; min: number; max: number }
 interface OptIngConstraint { idx: number; min: number; max: number }
-function runOptimizer(ings: any[], prices: Record<string,number>, constraints: OptConstraint[], ingConstraints: OptIngConstraint[], iterations: number = 10000): { solution: number[]; cost: number; feasible: boolean; improved: boolean } {
-  const n = ings.length; if (n === 0) return { solution: [], cost: 0, feasible: false, improved: false }
-  let current = ings.map(fi => fi.inclusion_pct || 0); const currentTotal = current.reduce((s, v) => s + v, 0)
-  if (currentTotal < 1) { const unlocked = ings.map((fi, i) => fi.locked ? -1 : i).filter(i => i >= 0); if (unlocked.length === 0) return { solution: current, cost: 0, feasible: false, improved: false }; current = ings.map((fi) => fi.locked ? fi.inclusion_pct : 100 / unlocked.length) }
-  else if (currentTotal < 95 || currentTotal > 105) { const scale = 100 / currentTotal; current = current.map((v, i) => ings[i].locked ? v : v * scale) }
-  const originalCost = calcSolCost(current)
-  function calcNutSol(sol: number[], key: string): number { return sol.reduce((s, pct, i) => s + (ings[i].ingredient?.[key] || 0) * pct / 100, 0) }
-  function calcSolCost(sol: number[]): number { const totalAF = sol.reduce((s, pct, i) => s + pct / 100 * 1000 / ((ings[i].ingredient?.dm_pct || 88) / 100), 0); return sol.reduce((s, pct, i) => { const afKg = pct / 100 * 1000 / ((ings[i].ingredient?.dm_pct || 88) / 100); return s + (prices[ings[i].ingredient_id] || 0) * (totalAF > 0 ? afKg / totalAF : 0) }, 0) }
-  function isFeasible(sol: number[]): boolean { const total = sol.reduce((s, v) => s + v, 0); if (total < 99.5 || total > 100.5) return false; for (const c of constraints) { if (!c.enabled) continue; const v = calcNutSol(sol, c.key); if (v < c.min || v > c.max) return false }; for (const ic of ingConstraints) { if (sol[ic.idx] < ic.min || sol[ic.idx] > ic.max) return false }; return true }
-  let best = [...current]; let bestCost = isFeasible(best) ? calcSolCost(best) : Infinity
-  for (let pass = 0; pass < 5; pass++) { let improved = false; for (let i = 0; i < n; i++) { if (ings[i].locked) continue; for (let j = 0; j < n; j++) { if (i === j || ings[j].locked) continue; let lo = 0, hi = Math.min(best[i], 60); for (let bs = 0; bs < 20; bs++) { const mid = (lo + hi) / 2; const candidate = [...best]; candidate[i] = Math.max(0, best[i] - mid); candidate[j] = Math.min(100, best[j] + mid); if (isFeasible(candidate) && calcSolCost(candidate) < bestCost) { lo = mid } else { hi = mid } } if (lo > 0.05) { const f2 = [...best]; f2[i] = Math.max(0, best[i] - lo); f2[j] = Math.min(100, best[j] + lo); if (isFeasible(f2)) { const nc = calcSolCost(f2); if (nc < bestCost - 0.01) { best = f2; bestCost = nc; improved = true } } } } } if (!improved) break }
-  for (let iter = 0; iter < iterations; iter++) { const candidate = [...best]; const step = 0.1 + Math.random() * 0.5; const i = Math.floor(Math.random() * n); const j = Math.floor(Math.random() * n); if (i === j || ings[i].locked || ings[j].locked) continue; candidate[i] = Math.max(0, candidate[i] - step); candidate[j] = Math.max(0, candidate[j] + step); if (isFeasible(candidate)) { const cost = calcSolCost(candidate); if (cost < bestCost) { best = candidate; bestCost = cost } } }
-  return { solution: best.map(v => Math.round(v * 10) / 10), cost: bestCost, feasible: bestCost < Infinity, improved: bestCost < originalCost - 0.5 }
-}
 
 // ── DEFAULT OPTIMIZER CONSTRAINTS BY MODE ─────────────────
 function defaultOptConstraints(mode: SpeciesMode, stage?: string): OptConstraint[] {
@@ -512,7 +500,35 @@ export default function FormulaBuilderPage() {
     const rows=ings.filter(fi=>fi.inclusion_pct>0).map(fi=>{const ing=fi.ingredient;const dmKg=(fi.inclusion_pct||0)/100*batchKg;const afKg=getAsFedKg(fi);const price=prices[fi.ingredient_id]||0;return[ing?.name,ing?.dm_pct,fi.inclusion_pct?.toFixed(2),dmKg.toFixed(1),afKg.toFixed(1),isMono?(ing?.ne_pig_mj||0).toFixed(1):(ing?.me_mj||0).toFixed(1),ing?.cp_pct,isMono?(ing?.sid_lys_pct||0).toFixed(2):(ing?.lysine_pct||0).toFixed(2),isMono?(ing?.sttd_p_pct||0).toFixed(2):(ing?.p_pct||0).toFixed(2),ing?.ca_pct,price.toFixed(0),(price*afKg/1000).toFixed(2)].join(',')})
     const meta = [`# Formula: ${formula.name}`,`# Species: ${formula.species} (${speciesMode} mode)`,`# Stage: ${stageName||formula.production_stage}`,`# ${primaryEnergyLabel}: ${primaryEnergy.toFixed(1)} MJ | CP: ${cp.toFixed(1)}%`,isMono?`# SID Lys: ${sid_lys.toFixed(2)}% | STTD P: ${sttd_p.toFixed(2)}% | Ca: ${ca.toFixed(2)}%`:`# MP: ${mpData.mpSupply.toFixed(0)}g/d | F:C: ${fcRatio} | NDF: ${ndf.toFixed(1)}%`,`# Cost/t AF: $${costAF.toFixed(0)}`,isPig?`# SID Lys:NE = ${sidLysToNE.toFixed(2)} g/Mcal`:'','']
     const csv=[...meta,headers.join(','),...rows].join('\n');const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${formula.name.replace(/[^a-zA-Z0-9]/g,'_')}_v${formula.version}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
-  function handleRunOptimizer(){setOptRunning(true);setOptResult(null);const ingC=ings.map((fi,idx)=>({idx,min:fi.locked?fi.inclusion_pct:0,max:fi.locked?fi.inclusion_pct:(fi.ingredient?.max_inclusion_pct||60)}));setTimeout(()=>{const result=runOptimizer(ings,prices,optConstraints,ingC,8000);setOptResult(result);setOptRunning(false)},100)}
+  function handleRunOptimizer() {
+    setOptRunning(true)
+    setOptResult(null)
+    const ingC = ings.map((fi, idx) => ({
+      idx,
+      min: fi.locked ? fi.inclusion_pct : 0,
+      max: fi.locked ? fi.inclusion_pct : (fi.ingredient?.max_inclusion_pct || 60),
+    }))
+    setTimeout(() => {
+      const result = runOptimizerLP(ings, prices, optConstraints, ingC, 8000)
+      setOptResult(result)
+      setOptRunning(false)
+      // Fire-and-forget: persist run for analytics/undo (never blocks UI)
+      fetch(`/api/formulas/${params.id}/optimize-runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: result.feasible ? 'feasible' : 'infeasible',
+          method: result.method ?? 'lp',
+          cost_before_af: costAF,
+          cost_after_af: result.feasible ? result.cost : null,
+          constraints_used: optConstraints.filter(c => c.enabled),
+          solution: result.solution,
+          diagnostics: result.diagnostics ?? null,
+          applied: false,
+        }),
+      }).catch(() => { /* silent fail */ })
+    }, 100)
+  }
   function applyOptResult(){if(!optResult?.solution)return;setIngs(ings.map((fi,idx)=>({...fi,inclusion_pct:optResult.solution[idx]||0})));setSaved(false);setShowOptimizer(false)}
   function saveToCompareSlot(slotIdx:number){const slots=[...compareSlots];slots[slotIdx]={name:`Diet ${slotIdx+1} — ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`,ings:ings.map(fi=>({name:fi.ingredient?.name,pct:fi.inclusion_pct,id:fi.ingredient_id})),production:{...production},nutrients:{cp,me:primaryEnergy,ndf,ee,ca,p:pp,starch,caP:isMono?caP_sttd:caP_total,peNDF,sid_lys,sttd_p},cost:costAF,margin:marginPerDay,mp:mpData.mpSupply,fc:fcRatio,timestamp:new Date()};setCompareSlots(slots)}
   function recallFromSlot(slotIdx:number){const slot=compareSlots[slotIdx];if(!slot)return;setIngs(ings.map(fi=>{const s2=slot.ings.find((si:any)=>si.id===fi.ingredient_id);return s2?{...fi,inclusion_pct:s2.pct}:{...fi,inclusion_pct:0}}));setProduction(slot.production);setSaved(false)}
@@ -757,7 +773,10 @@ export default function FormulaBuilderPage() {
 
       {/* OPTIMIZER */}
       {showOptimizer&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowOptimizer(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-2xl p-6 shadow-2xl max-h-[80vh] overflow-auto" onClick={e=>e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><Zap size={18} className="text-status-amber"/><div><div className="text-lg font-bold text-text">Least-Cost Optimizer</div><div className="text-2xs text-text-ghost">{speciesMode} mode · {optConstraints.filter(c=>c.enabled).length} active constraints</div></div></div><button onClick={()=>setShowOptimizer(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
+        <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><Zap size={18} className="text-status-amber"/><div><div className="text-lg font-bold text-text">Least-Cost Optimizer</div><div className="text-2xs text-text-ghost">
+          {speciesMode} mode · {optConstraints.filter(c=>c.enabled).length} active constraints
+          {optResult?.method && <span className="ml-1 px-1 rounded bg-brand/10 text-brand font-mono text-[9px]">{optResult.method === 'lp' ? 'LP' : 'HEURISTIC'}</span>}
+        </div></div></div><button onClick={()=>setShowOptimizer(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
         <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">Nutrient Constraints<span className="flex-1 h-px bg-border"/></div>
         <div className="grid grid-cols-2 gap-2 mb-4">{optConstraints.map((c, i) => (<div key={c.key} className={`flex items-center gap-2 p-2.5 rounded-lg border ${c.enabled?'border-brand/30 bg-brand/5':'border-border bg-surface-bg'}`}><input type="checkbox" checked={c.enabled} onChange={e=>{const u=[...optConstraints];u[i]={...u[i],enabled:e.target.checked};setOptConstraints(u)}} className="rounded"/><span className="text-xs font-semibold text-text-dim w-24">{c.label}</span><input type="number" value={c.min} step="0.01" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],min:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/><span className="text-2xs text-text-ghost">to</span><input type="number" value={c.max} step="0.01" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],max:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/></div>))}</div>
         <div className="flex gap-2 mb-4"><button onClick={handleRunOptimizer} disabled={optRunning||ings.length===0} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{optRunning?<><Loader2 size={14} className="animate-spin"/> Optimizing...</>:<><Zap size={14}/> Run Optimizer</>}</button></div>
