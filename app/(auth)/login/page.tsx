@@ -3,8 +3,10 @@
 import { useState, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { LanguageProvider, useTranslation } from '@/lib/i18n'
 
 function LoginContent() {
+  const { t } = useTranslation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -60,28 +62,26 @@ function LoginContent() {
         <div className="card p-6">
           {isWelcome && (
             <div className="bg-[#2E6B42]/15 border border-[#2E6B42]/30 rounded-lg px-4 py-3 mb-4">
-              <p className="text-sm font-semibold text-[#5dca7a]">Account created!</p>
-              <p className="text-xs text-[#5dca7a]/80 mt-0.5">Your 24-hour trial is active. Sign in with the password you just created.</p>
+              <p className="text-sm font-semibold text-[#5dca7a]">{t('login.account_created')}</p>
+              <p className="text-xs text-[#5dca7a]/80 mt-0.5">{t('login.trial_active')}</p>
             </div>
           )}
 
           <h1 className="text-xl font-bold text-text mb-1">
-            {isWelcome ? 'Sign in to get started' : 'Welcome back'}
+            {isWelcome ? t('login.sign_in_to_start') : t('login.welcome_back')}
           </h1>
           <p className="text-sm text-text-faint mb-6">
-            {isWelcome
-              ? 'Use the email and password from your signup'
-              : 'Sign in to your nutrition platform'}
+            {isWelcome ? t('login.use_signup_credentials') : t('login.sign_in_subtitle')}
           </p>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
             <input
-              type="email" placeholder="Email" value={email}
+              type="email" placeholder={t('common.email')} value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="input" required
             />
             <input
-              type="password" placeholder="Password" value={password}
+              type="password" placeholder={t('login.password')} value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="input" required minLength={6}
             />
@@ -89,16 +89,13 @@ function LoginContent() {
               <p className="text-sm text-status-red bg-status-red/10 rounded px-3 py-2">{error}</p>
             )}
             <button type="submit" disabled={loading} className="btn btn-primary w-full justify-center mt-1">
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? t('login.signing_in') : t('login.sign_in')}
             </button>
           </form>
 
           <div className="mt-4 text-center">
-            <a
-              href="https://optiafeed.cloud/#trial"
-              className="text-sm text-brand hover:underline"
-            >
-              Don&apos;t have an account? Start free trial
+            <a href="https://optiafeed.cloud/#trial" className="text-sm text-brand hover:underline">
+              {t('login.no_account')}
             </a>
           </div>
         </div>
@@ -113,8 +110,10 @@ function LoginContent() {
 
 export default function LoginPage() {
   return (
-    <Suspense>
-      <LoginContent />
-    </Suspense>
+    <LanguageProvider>
+      <Suspense>
+        <LoginContent />
+      </Suspense>
+    </LanguageProvider>
   )
 }
