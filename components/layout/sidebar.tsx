@@ -8,18 +8,19 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAiStore } from '@/lib/utils/store'
+import { useTranslation, LANGUAGES } from '@/lib/i18n'
 
 const navItems = [
-  { href: '/workspace', label: 'Workspace', icon: Home },
-  { href: '/clients', label: 'Clients', icon: Users },
-  { href: '/crm', label: 'CRM', icon: ClipboardList },
-  { href: '/animals', label: 'Animals', icon: Tag },
-  { href: '/ingredients', label: 'Ingredients', icon: Database },
-  { href: '/premixes', label: 'Premixes', icon: Package },
-  { href: '/formulas', label: 'Formulas', icon: FlaskConical },
-  { href: '/hub', label: 'Hub', icon: Radio },
-  { href: '/reports', label: 'Reports', icon: BarChart3 },
-  { href: '/community', label: 'Community', icon: Globe },
+  { href: '/workspace', key: 'workspace', icon: Home },
+  { href: '/clients', key: 'clients', icon: Users },
+  { href: '/crm', key: 'crm', icon: ClipboardList },
+  { href: '/animals', key: 'animals', icon: Tag },
+  { href: '/ingredients', key: 'ingredients', icon: Database },
+  { href: '/premixes', key: 'premixes', icon: Package },
+  { href: '/formulas', key: 'formulas', icon: FlaskConical },
+  { href: '/hub', key: 'hub', icon: Radio },
+  { href: '/reports', key: 'reports', icon: BarChart3 },
+  { href: '/community', key: 'community', icon: Globe },
 ]
 
 interface SidebarProps {
@@ -57,6 +58,7 @@ export function Sidebar({ user }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
   const toggleAi = useAiStore((s) => s.toggle)
+  const { lang, setLang, t } = useTranslation()
 
   return (
     <aside
@@ -94,7 +96,7 @@ export function Sidebar({ user }: SidebarProps) {
                 ${active ? 'bg-brand/12 text-brand' : 'text-text-muted hover:bg-surface-hover hover:text-text-dim'}`}
             >
               <Icon size={18} className="flex-shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && <span>{t(`sidebar.${item.key}`)}</span>}
             </Link>
           )
         })}
@@ -108,19 +110,37 @@ export function Sidebar({ user }: SidebarProps) {
             bg-brand/5 text-brand text-base font-semibold cursor-pointer transition-all hover:bg-brand/15"
         >
           <Sparkles size={18} />
-          {!collapsed && <span>AI Assistant</span>}
+          {!collapsed && <span>{t('sidebar.ai_assistant')}</span>}
         </button>
       </div>
 
+      {/* Language Selector */}
+      <div className={`px-2 mt-2 ${collapsed ? 'flex justify-center' : ''}`}>
+        <div className={`flex ${collapsed ? 'flex-col gap-1' : 'gap-1 px-3'}`}>
+          {LANGUAGES.map(l => (
+            <button
+              key={l.key}
+              onClick={() => setLang(l.key)}
+              title={l.label}
+              className={`flex items-center justify-center rounded transition-all cursor-pointer border-none
+                ${collapsed ? 'w-8 h-7 text-sm' : 'w-8 h-7 text-sm'}
+                ${lang === l.key ? 'bg-brand/15 ring-1 ring-brand/40' : 'bg-transparent hover:bg-white/5 opacity-50 hover:opacity-100'}`}
+            >
+              {l.flag}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Bottom */}
-      <div className="px-2 pb-4 mt-3">
+      <div className="px-2 pb-4 mt-2">
         <Link
           href="/settings"
           className={`flex items-center gap-3 px-3 py-2.5 rounded text-base font-semibold text-text-muted
             hover:bg-surface-hover transition-all no-underline ${pathname === '/settings' ? 'bg-brand/12 text-brand' : ''}`}
         >
           <Settings size={18} />
-          {!collapsed && <span>Settings</span>}
+          {!collapsed && <span>{t('sidebar.settings')}</span>}
         </Link>
 
         {!collapsed && (
