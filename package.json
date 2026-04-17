@@ -22,7 +22,7 @@
     "sonner": "^1.7.1",
     "zustand": "^5.0.2",
     "stripe": "^17.5.0",
-    "resend": "^4.1.0"
+    "resend": "^4.1.0",
     "javascript-lp-solver": "^0.4.24"
   },
   "devDependencies": {
