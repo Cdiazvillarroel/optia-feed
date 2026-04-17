@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { Plus, Sparkles, Save, Lock, Unlock, X, Search, ChevronDown, ChevronUp, Loader2, ToggleLeft, ToggleRight, Zap, GitCompare, RotateCcw, Download, Shield } from 'lucide-react'
 import ProfileEditorModal from '@/components/ProfileEditorModal'
 import { runOptimizer as runOptimizerLP } from '@/lib/optimizer'
+import { buildConstraintsFromProfile, mergeWithDefaults, type OptConstraintForUI } from '@/lib/optimizer/build-constraints'
 interface Req { nutrient: string; unit: string; min: number|null; max: number|null; target: number; critical_max?: number|null; critical_min?: number|null }
 interface Ratio { name: string; min: number; max: number; target: number; unit?: string }
 interface CompareSlot { name: string; ings: any[]; production: Record<string,string>; nutrients: Record<string,number>; cost: number; margin: number; mp: number; fc: string; timestamp: Date }
@@ -97,7 +98,7 @@ function defaultOptConstraints(mode: SpeciesMode, stage?: string): OptConstraint
     ]
   }
   if (mode === 'poultry') return [
-    { key: 'me_pig_mj', label: 'AME (MJ/kg)', enabled: true, min: 11.0, max: 13.5 },
+    { key: 'me_poultry_mj', label: 'AME (MJ/kg)', enabled: true, min: 11.0, max: 13.5 },
     { key: 'cp_pct', label: 'CP (%)', enabled: true, min: 16, max: 24 },
     { key: 'sid_lys_pct', label: 'Dig Lys (%)', enabled: true, min: 0.85, max: 1.30 },
     { key: 'sttd_p_pct', label: 'Avail P (%)', enabled: false, min: 0.25, max: 0.50 },
@@ -261,7 +262,7 @@ export default function FormulaBuilderPage() {
   const [showOptimizer, setShowOptimizer] = useState(false)
   const [optRunning, setOptRunning] = useState(false)
   const [optResult, setOptResult] = useState<any>(null)
-  const [optConstraints, setOptConstraints] = useState<OptConstraint[]>([])
+  const [optConstraints, setOptConstraints] = useState<OptConstraintForUI[]>([])
   const [showCompare, setShowCompare] = useState(false)
   const [compareSlots, setCompareSlots] = useState<(CompareSlot|null)[]>([null, null, null, null])
   // ── CHANGE 3.1: Track where requirements came from ──
@@ -275,7 +276,25 @@ export default function FormulaBuilderPage() {
   const isMono = isPig || isPoultry
 
   useEffect(() => { loadFormula() }, [params.id])
-  useEffect(() => { if (formula) setOptConstraints(defaultOptConstraints(getSpeciesMode(formula.species), formula.production_stage)) }, [formula?.species, formula?.production_stage])
+
+  // ═══════════════════════════════════════════════════════
+  // OPTIMIZER A.1: Auto-load constraints from profile
+  // Priority: profile requirements → fall back to defaults for missing
+  // ═══════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!formula) return
+    const mode = getSpeciesMode(formula.species)
+    const defaults = defaultOptConstraints(mode, formula.production_stage)
+      .map(c => ({ ...c, source: 'default' as const })) as OptConstraintForUI[]
+
+    // If profile loaded → merge profile constraints with defaults
+    if (requirements && requirements.length > 0) {
+      const fromProfile = buildConstraintsFromProfile(requirements, mode)
+      setOptConstraints(mergeWithDefaults(fromProfile, defaults))
+    } else {
+      setOptConstraints(defaults)
+    }
+  }, [formula?.species, formula?.production_stage, requirements])
 
   async function getSupabase() { const { createClient } = await import('@/lib/supabase/client'); return createClient() }
 
@@ -389,6 +408,7 @@ export default function FormulaBuilderPage() {
   const fcRatio=foragePct+concPct>0?`${Math.round(foragePct/(foragePct+concPct)*100)}:${Math.round(concPct/(foragePct+concPct)*100)}`:'—'
 
   const ne_pig=calcNut('ne_pig_mj'), me_pig=calcNut('me_pig_mj'), de_pig=calcNut('de_pig_mj')
+  const me_poultry=calcNut('me_poultry_mj')
   const sid_lys=calcNut('sid_lys_pct'), sid_met=calcNut('sid_met_pct'), sid_met_cys=calcNut('sid_met_cys_pct')
   const sid_thr=calcNut('sid_thr_pct'), sid_trp=calcNut('sid_trp_pct'), sid_ile=calcNut('sid_ile_pct')
   const sid_leu=calcNut('sid_leu_pct'), sid_val=calcNut('sid_val_pct'), sid_his=calcNut('sid_his_pct')
@@ -411,7 +431,7 @@ export default function FormulaBuilderPage() {
   const neMcal = ne_pig / 4.184
   const sidLysToNE = neMcal > 0 ? (sid_lys * 10) / neMcal : 0
 
-  const primaryEnergy = isPig ? ne_pig : isPoultry ? me_pig : me
+  const primaryEnergy = isPig ? ne_pig : isPoultry ? (me_poultry || me_pig) : me
   const primaryEnergyLabel = isPig ? 'NE' : isPoultry ? 'AME' : 'ME'
   const primaryEnergyUnit = 'MJ'
 
@@ -772,16 +792,201 @@ export default function FormulaBuilderPage() {
       </div></div>}
 
       {/* OPTIMIZER */}
-      {showOptimizer&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowOptimizer(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-2xl p-6 shadow-2xl max-h-[80vh] overflow-auto" onClick={e=>e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><Zap size={18} className="text-status-amber"/><div><div className="text-lg font-bold text-text">Least-Cost Optimizer</div><div className="text-2xs text-text-ghost">
-          {speciesMode} mode · {optConstraints.filter(c=>c.enabled).length} active constraints
-          {optResult?.method && <span className="ml-1 px-1 rounded bg-brand/10 text-brand font-mono text-[9px]">{optResult.method === 'lp' ? 'LP' : 'HEURISTIC'}</span>}
-        </div></div></div><button onClick={()=>setShowOptimizer(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18}/></button></div>
-        <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">Nutrient Constraints<span className="flex-1 h-px bg-border"/></div>
-        <div className="grid grid-cols-2 gap-2 mb-4">{optConstraints.map((c, i) => (<div key={c.key} className={`flex items-center gap-2 p-2.5 rounded-lg border ${c.enabled?'border-brand/30 bg-brand/5':'border-border bg-surface-bg'}`}><input type="checkbox" checked={c.enabled} onChange={e=>{const u=[...optConstraints];u[i]={...u[i],enabled:e.target.checked};setOptConstraints(u)}} className="rounded"/><span className="text-xs font-semibold text-text-dim w-24">{c.label}</span><input type="number" value={c.min} step="0.01" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],min:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/><span className="text-2xs text-text-ghost">to</span><input type="number" value={c.max} step="0.01" onChange={e=>{const u=[...optConstraints];u[i]={...u[i],max:parseFloat(e.target.value)||0};setOptConstraints(u)}} className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none" disabled={!c.enabled}/></div>))}</div>
-        <div className="flex gap-2 mb-4"><button onClick={handleRunOptimizer} disabled={optRunning||ings.length===0} className="btn btn-primary flex-1 justify-center disabled:opacity-50">{optRunning?<><Loader2 size={14} className="animate-spin"/> Optimizing...</>:<><Zap size={14}/> Run Optimizer</>}</button></div>
-        {optResult&&<div className={`p-4 rounded-lg border ${optResult.feasible?'border-brand/30 bg-brand/5':'border-status-red/30 bg-status-red/5'}`}><div className="flex items-center gap-2 mb-2"><span className={`text-sm font-bold ${optResult.feasible?'text-brand':'text-status-red'}`}>{optResult.feasible?'✓ Feasible':'✗ No feasible solution'}</span></div>{optResult.feasible&&<><div className="text-xs text-text-muted mb-2">Cost: <strong className="text-status-amber font-mono">${optResult.cost.toFixed(0)}/t</strong> (saving <strong className="text-brand">${(costAF-optResult.cost).toFixed(0)}/t</strong>)</div><button onClick={applyOptResult} className="btn btn-primary btn-sm w-full justify-center">Apply Optimized Diet</button></>}</div>}
-      </div></div>}
+      {showOptimizer && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowOptimizer(false)}>
+          <div className="bg-surface-card rounded-xl border border-border w-full max-w-3xl p-6 shadow-2xl max-h-[85vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <Zap size={18} className="text-status-amber" />
+                <div>
+                  <div className="text-lg font-bold text-text">Least-Cost Optimizer</div>
+                  <div className="text-2xs text-text-ghost">
+                    {speciesMode} mode · {optConstraints.filter(c => c.enabled).length} active constraints
+                    {optResult?.method && (
+                      <span className="ml-1 px-1 rounded bg-brand/10 text-brand font-mono text-[9px]">
+                        {optResult.method === 'lp' ? 'LP' : 'HEURISTIC'}
+                      </span>
+                    )}
+                    {optConstraints.some(c => c.source === 'profile') && (
+                      <span className="ml-1 px-1 rounded bg-brand/10 text-brand font-mono text-[9px]">PROFILE</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowOptimizer(false)} className="text-text-ghost bg-transparent border-none cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Profile auto-loaded notice */}
+            {optConstraints.some(c => c.source === 'profile') && (
+              <div className="mb-3 px-3 py-2 rounded-lg border border-brand/30 bg-brand/5 text-2xs text-text-muted">
+                ✓ Constraints auto-loaded from <strong className="text-brand">linked profile</strong>. Edit values below or uncheck to ignore.
+              </div>
+            )}
+
+            {/* Constraints */}
+            <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-2">
+              Nutrient Constraints<span className="flex-1 h-px bg-border" />
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {optConstraints.map((c, i) => (
+                <div key={c.key} className={`flex items-center gap-2 p-2.5 rounded-lg border ${c.enabled ? 'border-brand/30 bg-brand/5' : 'border-border bg-surface-bg'}`}>
+                  <input
+                    type="checkbox"
+                    checked={c.enabled}
+                    onChange={e => { const u = [...optConstraints]; u[i] = { ...u[i], enabled: e.target.checked }; setOptConstraints(u) }}
+                    className="rounded"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-text-dim truncate">{c.label}</div>
+                    {c.source === 'profile' && (
+                      <div className="text-[9px] text-brand/70 font-mono">● from profile</div>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    value={c.min}
+                    step="0.01"
+                    onChange={e => { const u = [...optConstraints]; u[i] = { ...u[i], min: parseFloat(e.target.value) || 0 }; setOptConstraints(u) }}
+                    className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none"
+                    disabled={!c.enabled}
+                  />
+                  <span className="text-2xs text-text-ghost">to</span>
+                  <input
+                    type="number"
+                    value={c.max}
+                    step="0.01"
+                    onChange={e => { const u = [...optConstraints]; u[i] = { ...u[i], max: parseFloat(e.target.value) || 0 }; setOptConstraints(u) }}
+                    className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none"
+                    disabled={!c.enabled}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={handleRunOptimizer}
+                disabled={optRunning || ings.length === 0}
+                className="btn btn-primary flex-1 justify-center disabled:opacity-50"
+              >
+                {optRunning ? <><Loader2 size={14} className="animate-spin" /> Optimizing...</> : <><Zap size={14} /> Run Optimizer</>}
+              </button>
+            </div>
+
+            {/* Results */}
+            {optResult && (
+              <div className={`p-4 rounded-lg border ${optResult.feasible ? 'border-brand/30 bg-brand/5' : 'border-status-red/30 bg-status-red/5'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <span className={`text-sm font-bold ${optResult.feasible ? 'text-brand' : 'text-status-red'}`}>
+                    {optResult.feasible ? '✓ Feasible' : '✗ No feasible solution'}
+                  </span>
+                  {optResult.feasible && (
+                    <div className="text-xs text-text-muted">
+                      <strong className="text-status-amber font-mono">${optResult.cost.toFixed(0)}/t</strong>
+                      <span className="ml-2">save <strong className="text-brand">${(costAF - optResult.cost).toFixed(0)}/t</strong></span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Infeasibility reasons */}
+                {!optResult.feasible && optResult.diagnostics?.infeasibility_reasons?.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-2xs font-bold text-status-red uppercase mb-1">Why no solution exists</div>
+                    <ul className="text-2xs text-text-muted space-y-0.5">
+                      {optResult.diagnostics.infeasibility_reasons.slice(0, 5).map((r: string, i: number) => (
+                        <li key={i} className="flex items-start gap-1.5"><span className="flex-shrink-0">•</span><span>{r}</span></li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {optResult.feasible && (
+                  <>
+                    {/* Binding constraints */}
+                    {optResult.diagnostics?.binding_constraints?.length > 0 && (
+                      <div className="mb-3 px-3 py-2 rounded border border-status-amber/30 bg-status-amber/5">
+                        <div className="text-2xs font-bold text-status-amber uppercase mb-1">⚡ Active limits ({optResult.diagnostics.binding_constraints.length})</div>
+                        <div className="text-2xs text-text-muted">
+                          {optResult.diagnostics.binding_constraints.map((bc: string, i: number) => {
+                            const c = optConstraints.find(oc => oc.key === bc)
+                            return (
+                              <span key={i} className="inline-block mr-2">
+                                <span className="font-mono">{c?.label || bc}</span>
+                              </span>
+                            )
+                          })}
+                        </div>
+                        <div className="text-[9px] text-text-ghost mt-0.5">These constraints are limiting further cost reduction.</div>
+                      </div>
+                    )}
+
+                    {/* Diff table */}
+                    <div className="mb-3">
+                      <div className="text-2xs font-bold text-text-muted uppercase mb-1.5">Inclusion changes</div>
+                      <div className="rounded border border-border overflow-hidden">
+                        <table className="w-full text-2xs">
+                          <thead className="bg-surface-deep">
+                            <tr>
+                              <th className="px-2 py-1 text-left text-text-ghost font-semibold">Ingredient</th>
+                              <th className="px-2 py-1 text-right text-text-ghost font-semibold">Before</th>
+                              <th className="px-2 py-1 text-right text-text-ghost font-semibold">After</th>
+                              <th className="px-2 py-1 text-right text-text-ghost font-semibold">Δ</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ings.map((fi, idx) => {
+                              const before = fi.inclusion_pct || 0
+                              const after = optResult.solution[idx] || 0
+                              const delta = after - before
+                              if (Math.abs(delta) < 0.05 && before === 0) return null
+                              const deltaColor = Math.abs(delta) < 0.05 ? 'text-text-ghost' : delta > 0 ? 'text-brand' : 'text-status-amber'
+                              return (
+                                <tr key={fi.id || idx} className="border-t border-border/30 hover:bg-surface-deep/30">
+                                  <td className="px-2 py-1 text-text-dim flex items-center gap-1">
+                                    {fi.locked && <Lock size={9} className="text-status-amber" />}
+                                    <span className="truncate">{fi.ingredient?.name}</span>
+                                  </td>
+                                  <td className="px-2 py-1 text-right font-mono text-text-ghost">{before.toFixed(1)}%</td>
+                                  <td className="px-2 py-1 text-right font-mono font-bold text-text-dim">{after.toFixed(1)}%</td>
+                                  <td className={`px-2 py-1 text-right font-mono font-bold ${deltaColor}`}>
+                                    {delta > 0 ? '+' : ''}{delta.toFixed(1)}%
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Warnings */}
+                    {optResult.diagnostics?.warnings?.length > 0 && (
+                      <div className="mb-3 px-3 py-2 rounded border border-status-amber/30 bg-status-amber/5">
+                        <div className="text-2xs font-bold text-status-amber uppercase mb-1">Warnings</div>
+                        <ul className="text-2xs text-text-muted space-y-0.5">
+                          {optResult.diagnostics.warnings.map((w: string, i: number) => (
+                            <li key={i} className="flex items-start gap-1.5"><span className="flex-shrink-0">⚠</span><span>{w}</span></li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={applyOptResult}
+                      className="btn btn-primary btn-sm w-full justify-center"
+                    >
+                      Apply Optimized Diet
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* COMPARE */}
       {showCompare&&<div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={()=>setShowCompare(false)}><div className="bg-surface-card rounded-xl border border-border w-full max-w-4xl p-6 shadow-2xl max-h-[80vh] overflow-auto" onClick={e=>e.stopPropagation()}>
