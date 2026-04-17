@@ -1013,7 +1013,6 @@ const TRANSLATIONS: Record<Language, any> = {
     },
 
     crm: {
-      crm: {
       title: 'CRM',
       subtitle: 'Registrar actividades, visitas, tareas y documentos',
       dashboard: 'Panel',
