@@ -3,6 +3,7 @@
 
 import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { LanguageProvider, useTranslation } from '@/lib/i18n';
 
 const PLANS = [
   {
@@ -10,7 +11,7 @@ const PLANS = [
     name: 'Starter',
     price: 49,
     period: '/month',
-    description: 'For independent consultants starting out',
+    descKey: 'subscribe.starter_desc',
     features: [
       'Up to 10 clients',
       'Ruminant formulation (AFRC)',
@@ -18,14 +19,14 @@ const PLANS = [
       'PDF report generation',
       'Email support',
     ],
-    cta: 'Start with Starter',
+    ctaKey: 'subscribe.start_starter',
   },
   {
     id: 'professional',
     name: 'Professional',
     price: 99,
     period: '/month',
-    description: 'Full-featured platform for growing practices',
+    descKey: 'subscribe.professional_desc',
     features: [
       'Unlimited clients',
       'All species (ruminant, pig, poultry)',
@@ -36,7 +37,7 @@ const PLANS = [
       'Ingredient price tracking',
       'Priority support',
     ],
-    cta: 'Go Professional',
+    ctaKey: 'subscribe.go_professional',
     popular: true,
   },
   {
@@ -44,7 +45,7 @@ const PLANS = [
     name: 'Enterprise',
     price: 199,
     period: '/month',
-    description: 'For large practices and feedlot consultants',
+    descKey: 'subscribe.enterprise_desc',
     features: [
       'Everything in Professional',
       'Team accounts (up to 5 users)',
@@ -53,11 +54,12 @@ const PLANS = [
       'Dedicated account manager',
       'Custom integrations',
     ],
-    cta: 'Contact us',
+    ctaKey: 'subscribe.contact_us',
   },
 ];
 
 function SubscribeContent() {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const cancelled = searchParams?.get('cancelled');
@@ -103,7 +105,7 @@ function SubscribeContent() {
             letterSpacing: '0.05em',
             marginBottom: 8,
           }}>
-            Your 24-hour trial has ended
+            {t('subscribe.trial_ended')}
           </p>
           <h1 style={{
             fontSize: 28,
@@ -111,11 +113,11 @@ function SubscribeContent() {
             color: '#1a1612',
             margin: '0 0 8px',
           }}>
-            Choose your plan to continue
+            {t('subscribe.choose_plan')}
           </h1>
           <p style={{ fontSize: 15, color: '#6B6460', margin: 0 }}>
-            All plans include <strong style={{ color: '#2E6B42' }}>14 days free</strong>. 
-            Your data is saved — pick up right where you left off.
+            {t('subscribe.all_plans_include')} <strong style={{ color: '#2E6B42' }}>{t('subscribe.fourteen_days_free')}</strong>.
+            {' '}{t('subscribe.data_saved')}
           </p>
           {cancelled && (
             <p style={{
@@ -127,7 +129,7 @@ function SubscribeContent() {
               borderRadius: 8,
               display: 'inline-block',
             }}>
-              Checkout was cancelled. Choose a plan when you're ready.
+              {t('subscribe.checkout_cancelled')}
             </p>
           )}
         </div>
@@ -167,7 +169,7 @@ function SubscribeContent() {
                   textTransform: 'uppercase' as const,
                   letterSpacing: '0.04em',
                 }}>
-                  Most popular
+                  {t('subscribe.most_popular')}
                 </span>
               )}
 
@@ -184,7 +186,7 @@ function SubscribeContent() {
                 color: '#9B9590',
                 margin: '0 0 20px',
               }}>
-                {plan.description}
+                {t(plan.descKey)}
               </p>
 
               <div style={{ marginBottom: 20 }}>
@@ -220,7 +222,7 @@ function SubscribeContent() {
                   opacity: loading === plan.id ? 0.7 : 1,
                 }}
               >
-                {loading === plan.id ? 'Redirecting...' : plan.cta}
+                {loading === plan.id ? t('subscribe.redirecting') : t(plan.ctaKey)}
               </button>
 
               <ul style={{
@@ -257,9 +259,10 @@ function SubscribeContent() {
           color: '#9B9590',
           marginTop: 32,
         }}>
-          All prices in AUD. Cancel anytime during your 14-day free period at no cost. 
+          {t('subscribe.cancel_anytime')}
           <br />
-          Need help? <a href="mailto:support@optiafeed.cloud" style={{ color: '#1E4A5A' }}>
+          {t('subscribe.need_help')}{' '}
+          <a href="mailto:support@optiafeed.cloud" style={{ color: '#1E4A5A' }}>
             support@optiafeed.cloud
           </a>
         </p>
@@ -270,8 +273,10 @@ function SubscribeContent() {
 
 export default function SubscribePage() {
   return (
-    <Suspense>
-      <SubscribeContent />
-    </Suspense>
+    <LanguageProvider>
+      <Suspense>
+        <SubscribeContent />
+      </Suspense>
+    </LanguageProvider>
   );
 }
