@@ -2,21 +2,23 @@
 
 import { useState, useEffect } from 'react'
 import { Shield, ChevronRight } from 'lucide-react'
+import { useTranslation } from '@/lib/i18n'
 
 interface Requirement { nutrient: string; unit: string; min: number|null; max: number|null; target: number; critical_max?: number|null; critical_min?: number|null }
 interface Ratio { name: string; min: number; max: number; target: number; unit?: string }
 interface StageData { id: string; species: string; production_stage: string; stage_name: string; stage_description: string; requirements: Requirement[]; ratios: Ratio[] }
 interface SafetyRule { id: string; species: string; severity: string; title: string; description: string; detail: string; ingredient_name: string|null }
 
-const SPECIES_LIST = [
-  { key: 'cattle', name: 'Dairy Cattle', emoji: '🐄', color: '#4CAF7D' },
-  { key: 'beef', name: 'Beef Cattle', emoji: '🐂', color: '#8B6914' },
-  { key: 'pig', name: 'Pigs', emoji: '🐷', color: '#E88B6E' },
-  { key: 'poultry', name: 'Poultry', emoji: '🐔', color: '#D4A843' },
-  { key: 'sheep', name: 'Sheep', emoji: '🐑', color: '#7BA0C4' },
+const SPECIES_KEYS = [
+  { key: 'cattle', tKey: 'animals.dairy_cattle', emoji: '🐄', color: '#4CAF7D' },
+  { key: 'beef', tKey: 'animals.beef_cattle', emoji: '🐂', color: '#8B6914' },
+  { key: 'pig', tKey: 'animals.pigs', emoji: '🐷', color: '#E88B6E' },
+  { key: 'poultry', tKey: 'animals.poultry', emoji: '🐔', color: '#D4A843' },
+  { key: 'sheep', tKey: 'animals.sheep', emoji: '🐑', color: '#7BA0C4' },
 ]
 
 export default function AnimalsPage() {
+  const { t } = useTranslation()
   const [species, setSpecies] = useState('beef')
   const [stages, setStages] = useState<StageData[]>([])
   const [selectedStage, setSelectedStage] = useState<StageData|null>(null)
@@ -50,18 +52,18 @@ export default function AnimalsPage() {
   }
 
   const dangerCount = rules.filter(r => r.severity === 'danger').length
-  const spData = SPECIES_LIST.find(s => s.key === species)
+  const spData = SPECIES_KEYS.find(s => s.key === species)
 
   return (
     <div className="p-7 max-w-[1400px]">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-text">Animals & Requirements</h1>
-        <p className="text-base text-text-faint mt-1">Species profiles, production stages, nutritional requirements and safety rules</p>
+        <h1 className="text-2xl font-bold text-text">{t('animals.title')}</h1>
+        <p className="text-base text-text-faint mt-1">{t('animals.subtitle')}</p>
       </div>
 
       {/* Species Cards */}
       <div className="grid grid-cols-5 gap-3 mb-6">
-        {SPECIES_LIST.map((s) => (
+        {SPECIES_KEYS.map((s) => (
           <div
             key={s.key}
             onClick={() => { setSpecies(s.key); setTab('requirements') }}
@@ -70,9 +72,9 @@ export default function AnimalsPage() {
           >
             {species === s.key && <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-lg" style={{ background: s.color }} />}
             <div className="text-2xl mb-2">{s.emoji}</div>
-            <div className="text-sm font-bold text-text-dim">{s.name}</div>
+            <div className="text-sm font-bold text-text-dim">{t(s.tKey)}</div>
             <div className="text-2xs text-text-ghost mt-0.5">
-              {species === s.key && !loading ? `${stages.length} stages · ${rules.length} rules` : 'Click to view'}
+              {species === s.key && !loading ? `${stages.length} ${t('animals.stages')} · ${rules.length} ${t('animals.rules')}` : t('animals.click_to_view')}
             </div>
           </div>
         ))}
@@ -81,26 +83,26 @@ export default function AnimalsPage() {
       {/* Tabs */}
       <div className="flex gap-0.5 bg-surface-card rounded-[10px] p-[3px] border border-border w-fit mb-5">
         <button onClick={() => setTab('requirements')} className={`px-4 py-2 rounded text-sm font-semibold transition-all ${tab==='requirements'?'bg-brand text-white':'text-text-faint hover:bg-white/5'}`}>
-          Nutritional Requirements
+          {t('animals.nutritional_requirements')}
         </button>
         <button onClick={() => setTab('safety')} className={`px-4 py-2 rounded text-sm font-semibold transition-all flex items-center gap-1.5 ${tab==='safety'?'bg-brand text-white':'text-text-faint hover:bg-white/5'}`}>
-          <Shield size={14} /> Safety Rules
+          <Shield size={14} /> {t('animals.safety_rules')}
           {dangerCount > 0 && <span className="text-2xs px-1.5 py-0.5 rounded-full bg-status-red/20 text-status-red font-mono font-bold">{rules.length}</span>}
         </button>
         <button onClick={() => setTab('overview')} className={`px-4 py-2 rounded text-sm font-semibold transition-all ${tab==='overview'?'bg-brand text-white':'text-text-faint hover:bg-white/5'}`}>
-          Overview
+          {t('animals.overview')}
         </button>
       </div>
 
       {loading ? (
-        <div className="card p-12 text-center text-sm text-text-ghost">Loading {spData?.name} data...</div>
+        <div className="card p-12 text-center text-sm text-text-ghost">{t('common.loading')}</div>
       ) : (
         <>
           {/* REQUIREMENTS TAB */}
           {tab === 'requirements' && (
             <>
               {/* Stage selector */}
-              <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">Production Stage<span className="flex-1 h-px bg-border" /></div>
+              <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">{t('animals.production_stage')}<span className="flex-1 h-px bg-border" /></div>
               <div className="grid grid-cols-4 gap-2.5 mb-6">
                 {stages.map((s) => (
                   <div key={s.id} onClick={() => setSelectedStage(s)}
@@ -116,18 +118,18 @@ export default function AnimalsPage() {
                 <>
                   {/* Requirements table */}
                   <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                    Nutrient Requirements — {selectedStage.stage_name}<span className="flex-1 h-px bg-border" />
+                    {t('animals.nutrient_requirements')} — {selectedStage.stage_name}<span className="flex-1 h-px bg-border" />
                   </div>
                   <div className="card mb-5">
                     <table className="w-full border-collapse">
                       <thead>
                         <tr className="border-b border-border">
-                          <th className="px-4 py-2.5 text-left text-2xs font-bold text-text-ghost uppercase tracking-wider" style={{width:'30%'}}>Nutrient</th>
-                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Unit</th>
-                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Min</th>
-                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Target</th>
-                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Max</th>
-                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Critical</th>
+                          <th className="px-4 py-2.5 text-left text-2xs font-bold text-text-ghost uppercase tracking-wider" style={{width:'30%'}}>{t('animals.nutrient')}</th>
+                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">{t('animals.unit')}</th>
+                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">{t('animals.min')}</th>
+                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">{t('animals.target')}</th>
+                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">{t('animals.max')}</th>
+                          <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">{t('animals.critical')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -153,7 +155,7 @@ export default function AnimalsPage() {
                   {selectedStage.ratios && selectedStage.ratios.length > 0 && (
                     <>
                       <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                        Key Ratios<span className="flex-1 h-px bg-border" />
+                        {t('animals.key_ratios')}<span className="flex-1 h-px bg-border" />
                       </div>
                       <div className="grid grid-cols-3 gap-3 mb-5">
                         {selectedStage.ratios.map((r, i) => (
@@ -161,7 +163,7 @@ export default function AnimalsPage() {
                             <div className="text-xs text-text-ghost font-semibold uppercase tracking-wider mb-1">{r.name}{r.unit ? ` (${r.unit})` : ''}</div>
                             <div className="flex items-baseline gap-3">
                               <span className="text-2xl font-bold font-mono text-brand">{r.target}</span>
-                              <span className="text-xs font-mono text-text-ghost">range: {r.min} – {r.max}</span>
+                              <span className="text-xs font-mono text-text-ghost">{t('animals.range')}: {r.min} – {r.max}</span>
                             </div>
                           </div>
                         ))}
@@ -171,12 +173,12 @@ export default function AnimalsPage() {
 
                   {/* Quick compare */}
                   <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                    Stage Comparison<span className="flex-1 h-px bg-border" />
+                    {t('animals.stage_comparison')}<span className="flex-1 h-px bg-border" />
                   </div>
                   <div className="card">
                     <table className="w-full border-collapse">
                       <thead><tr className="border-b border-border">
-                        <th className="px-4 py-2.5 text-left text-2xs font-bold text-text-ghost uppercase">Stage</th>
+                        <th className="px-4 py-2.5 text-left text-2xs font-bold text-text-ghost uppercase">{t('animals.production_stage')}</th>
                         <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">CP %</th>
                         <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Energy</th>
                         <th className="px-3 py-2.5 text-center text-2xs font-bold text-text-ghost uppercase">Ca %</th>
@@ -213,7 +215,7 @@ export default function AnimalsPage() {
               {['danger','warning','info'].map((sev) => {
                 const filtered = rules.filter(r => r.severity === sev)
                 if (!filtered.length) return null
-                const label = sev === 'danger' ? '🚫 Critical — Do Not Exceed' : sev === 'warning' ? '⚠️ Warnings — Monitor Closely' : 'ℹ️ Guidelines — Best Practice'
+                const label = sev === 'danger' ? `🚫 ${t('animals.critical_do_not_exceed')}` : sev === 'warning' ? `⚠️ ${t('animals.warnings_monitor')}` : `ℹ️ ${t('animals.guidelines_best_practice')}`
                 const color = sev === 'danger' ? 'text-status-red' : sev === 'warning' ? 'text-status-amber' : 'text-status-blue'
                 return (
                   <div key={sev} className="mb-5">
@@ -244,10 +246,10 @@ export default function AnimalsPage() {
             <>
               <div className="grid grid-cols-4 gap-3.5 mb-6">
                 {[
-                  {l:'Production Stages',v:stages.length,c:spData?.color||'#4CAF7D'},
-                  {l:'Nutrient Parameters',v:stages.reduce((s,st) => s+st.requirements.length, 0),c:spData?.color||'#4CAF7D'},
-                  {l:'Safety Rules',v:rules.length,c:spData?.color||'#4CAF7D'},
-                  {l:'Critical Rules',v:dangerCount,c:'#E05252'},
+                  {l:t('animals.production_stages'),v:stages.length,c:spData?.color||'#4CAF7D'},
+                  {l:t('animals.nutrient_parameters'),v:stages.reduce((s,st) => s+st.requirements.length, 0),c:spData?.color||'#4CAF7D'},
+                  {l:t('animals.safety_rules'),v:rules.length,c:spData?.color||'#4CAF7D'},
+                  {l:t('animals.critical_rules'),v:dangerCount,c:'#E05252'},
                 ].map((s,i) => (
                   <div key={i} className="stat-card">
                     <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-1">{s.l}</div>
@@ -257,7 +259,7 @@ export default function AnimalsPage() {
               </div>
 
               <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-                All Stages — {spData?.name}<span className="flex-1 h-px bg-border" />
+                {t('animals.all_stages')} — {spData ? t(spData.tKey) : ''}<span className="flex-1 h-px bg-border" />
               </div>
               <div className="grid grid-cols-2 gap-3 mb-6">
                 {stages.map((s) => (
@@ -265,7 +267,7 @@ export default function AnimalsPage() {
                     onClick={() => { setSelectedStage(s); setTab('requirements') }}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-bold text-text-dim">{s.stage_name}</span>
-                      <span className="text-2xs text-text-ghost font-mono">{s.requirements.length} nutrients</span>
+                      <span className="text-2xs text-text-ghost font-mono">{s.requirements.length} {t('animals.nutrients')}</span>
                     </div>
                     <p className="text-xs text-text-faint mb-2 line-clamp-2">{s.stage_description?.replace('DAIRY | ','')}</p>
                     <div className="flex gap-1.5 flex-wrap">
@@ -281,9 +283,7 @@ export default function AnimalsPage() {
               </div>
 
               <div className="card p-4">
-                <p className="text-sm text-text-muted leading-relaxed">
-                  Requirements based on <strong className="text-text-dim">CSIRO Feeding Standards for Australian Livestock</strong> and <strong className="text-text-dim">NRC Nutrient Requirements</strong>. Values represent typical ranges — adjust based on genetics, environment, and production targets.
-                </p>
+                <p className="text-sm text-text-muted leading-relaxed">{t('animals.requirements_source')}</p>
               </div>
             </>
           )}
