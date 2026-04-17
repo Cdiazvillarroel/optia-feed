@@ -6,6 +6,7 @@ import {
   Users, FlaskConical, Megaphone, ChevronUp, Send, X, Copy, Globe, Eye, EyeOff,
   CheckCircle, Clock, XCircle, ArrowUpRight, Sparkles, Filter
 } from 'lucide-react'
+import { useTranslation } from '@/lib/i18n'
 
 type PostType = 'feature_request' | 'bug' | 'idea' | 'question'
 type PostStatus = 'open' | 'planned' | 'in_progress' | 'completed' | 'declined'
@@ -30,6 +31,7 @@ const SPECIES_LABELS: Record<string, string> = {
 }
 
 export default function CommunityPage() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<'feedback' | 'templates' | 'ai' | 'directory' | 'news'>('feedback')
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
@@ -277,18 +279,18 @@ export default function CommunityPage() {
   const filteredPosts = filterType === 'all' ? posts : posts.filter(p => p.type === filterType)
 
   const TABS = [
-    { key: 'feedback', label: 'Feedback Board', icon: MessageSquarePlus, count: posts.length },
-    { key: 'templates', label: 'Templates', icon: FlaskConical, count: templates.length },
-    { key: 'ai', label: 'AI Feedback', icon: Sparkles, count: aiStats.total },
-    { key: 'directory', label: 'Directory', icon: Users, count: profiles.length },
-    { key: 'news', label: 'News', icon: Megaphone, count: announcements.length },
+    { key: 'feedback', label: t('community.feedback_board'), icon: MessageSquarePlus, count: posts.length },
+    { key: 'templates', label: t('community.templates'), icon: FlaskConical, count: templates.length },
+    { key: 'ai', label: t('community.ai_feedback'), icon: Sparkles, count: aiStats.total },
+    { key: 'directory', label: t('community.directory'), icon: Users, count: profiles.length },
+    { key: 'news', label: t('community.news'), icon: Megaphone, count: announcements.length },
   ]
 
   return (
     <div className="p-7 max-w-[1100px]">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-text">Community</h1>
-        <p className="text-base text-text-faint mt-1">Connect with fellow nutritionists, share knowledge, and help shape the platform.</p>
+        <h1 className="text-2xl font-bold text-text">{t('community.title')}</h1>
+        <p className="text-base text-text-faint mt-1">{t('community.subtitle')}</p>
       </div>
 
       {/* Tabs */}
@@ -308,20 +310,20 @@ export default function CommunityPage() {
         <>
           <div className="flex items-center justify-between mb-4">
             <div className="flex gap-1.5">
-              <button onClick={() => setFilterType('all')} className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${filterType === 'all' ? 'bg-brand text-white border-brand' : 'bg-surface-deep text-text-muted border-border hover:border-brand/30'}`}>All</button>
+              <button onClick={() => setFilterType('all')} className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${filterType === 'all' ? 'bg-brand text-white border-brand' : 'bg-surface-deep text-text-muted border-border hover:border-brand/30'}`}>{t('common.all')}</button>
               {POST_TYPES.map(pt => (
                 <button key={pt.key} onClick={() => setFilterType(pt.key)} className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all flex items-center gap-1 ${filterType === pt.key ? 'bg-brand text-white border-brand' : 'bg-surface-deep text-text-muted border-border hover:border-brand/30'}`}>
                   <pt.icon size={12} /> {pt.label}
                 </button>
               ))}
             </div>
-            <button onClick={() => setShowNewPost(true)} className="btn btn-primary btn-sm"><MessageSquarePlus size={14} /> New Post</button>
+            <button onClick={() => setShowNewPost(true)} className="btn btn-primary btn-sm"><MessageSquarePlus size={14} />{t('community.new_post')}</button>
           </div>
 
           {filteredPosts.length === 0 ? (
             <div className="card p-12 text-center">
               <MessageSquarePlus size={32} className="text-text-ghost mx-auto mb-3" />
-              <p className="text-sm text-text-ghost mb-3">No posts yet. Be the first to share feedback!</p>
+              <p className="text-sm text-text-ghost mb-3">{t('community.no_posts')}</p>
               <button onClick={() => setShowNewPost(true)} className="btn btn-primary btn-sm mx-auto"><MessageSquarePlus size={14} /> New Post</button>
             </div>
           ) : (
@@ -394,7 +396,7 @@ export default function CommunityPage() {
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowNewPost(false)}>
               <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-bold text-text">New Post</h2>
+                  <h2 className="text-lg font-bold text-text">{t('community.new_post')}</h2>
                   <button onClick={() => setShowNewPost(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button>
                 </div>
                 <div className="flex flex-col gap-3">
@@ -419,9 +421,9 @@ export default function CommunityPage() {
                   </div>
                 </div>
                 <div className="flex gap-2 mt-4">
-                  <button onClick={() => setShowNewPost(false)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
+                  <button onClick={() => setShowNewPost(false)} className="btn btn-ghost flex-1 justify-center">{t('common.cancel')}</button>
                   <button onClick={submitPost} disabled={saving || !newPostTitle.trim() || !newPostDesc.trim()} className="btn btn-primary flex-1 justify-center disabled:opacity-50">
-                    {saving ? 'Posting...' : 'Submit'}
+                    {saving ? t('community.posting') : t('common.submit')}
                   </button>
                 </div>
               </div>
@@ -435,14 +437,14 @@ export default function CommunityPage() {
         <>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm text-text-faint">Formula templates shared by the community. Clone any template to use as a starting point.</p>
-            <button onClick={() => setShowShareTemplate(true)} className="btn btn-primary btn-sm"><FlaskConical size={14} /> Share Template</button>
+            <button onClick={() => setShowShareTemplate(true)} className="btn btn-primary btn-sm"><FlaskConical size={14} /> {t('community.share_template')}</button>
           </div>
 
           {templates.length === 0 ? (
             <div className="card p-12 text-center">
               <FlaskConical size={32} className="text-text-ghost mx-auto mb-3" />
-              <p className="text-sm text-text-ghost mb-3">No templates shared yet. Be the first to share a formula!</p>
-              <button onClick={() => setShowShareTemplate(true)} className="btn btn-primary btn-sm mx-auto"><FlaskConical size={14} /> Share Template</button>
+              <p className="text-sm text-text-ghost mb-3">{t('community.no_templates')}</p>
+              <button onClick={() => setShowShareTemplate(true)} className="btn btn-primary btn-sm mx-auto"><FlaskConical size={14} /> {t('community.share_template')}</button>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
@@ -464,7 +466,7 @@ export default function CommunityPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-2xs text-text-ghost font-mono"><Copy size={10} className="inline mr-1" />{t.clone_count || 0} cloned</span>
-                    <button onClick={() => cloneTemplate(t)} disabled={saving} className="btn btn-ghost btn-sm text-brand"><Copy size={12} /> Clone to My Formulas</button>
+                    <button onClick={() => cloneTemplate(t)} disabled={saving} className="btn btn-ghost btn-sm text-brand"><Copy size={12} /> {t('community.clone_to_formulas')}</button>
                   </div>
                 </div>
               ))}
@@ -476,7 +478,7 @@ export default function CommunityPage() {
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowShareTemplate(false)}>
               <div className="bg-surface-card rounded-xl border border-border w-full max-w-lg p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-bold text-text">Share Formula as Template</h2>
+                  <h2 className="text-lg font-bold text-text">{t('community.share_formula_template')}</h2>
                   <button onClick={() => setShowShareTemplate(false)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button>
                 </div>
                 <div className="flex flex-col gap-3">
@@ -514,15 +516,15 @@ export default function CommunityPage() {
         <>
           <div className="grid grid-cols-3 gap-3.5 mb-6">
             <div className="stat-card">
-              <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-1">Total Reviews Rated</div>
+              <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-1">{t('community.total_reviews_rated')}</div>
               <div className="text-2xl font-bold font-mono text-brand">{aiStats.total}</div>
             </div>
             <div className="stat-card">
-              <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-1">Helpful</div>
+              <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-1">{t('community.helpful')}</div>
               <div className="text-2xl font-bold font-mono text-status-green flex items-center gap-2"><ThumbsUp size={18} /> {aiStats.helpful}</div>
             </div>
             <div className="stat-card">
-              <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-1">Needs Improvement</div>
+              <div className="text-xs font-semibold text-text-faint uppercase tracking-wider mb-1">{t('community.needs_improvement')}</div>
               <div className="text-2xl font-bold font-mono text-status-amber flex items-center gap-2"><ThumbsDown size={18} /> {aiStats.notHelpful}</div>
             </div>
           </div>
@@ -530,7 +532,7 @@ export default function CommunityPage() {
           <div className="card p-4 mb-4">
             <div className="flex items-center gap-2 mb-2">
               <Sparkles size={16} className="text-brand" />
-              <span className="text-sm font-bold text-text-dim">How AI Feedback works</span>
+              <span className="text-sm font-bold text-text-dim">{t('community.how_ai_feedback_works')}</span>
             </div>
             <p className="text-xs text-text-muted leading-relaxed">
               When you view an AI review on any formula, use the 👍 / 👎 buttons to rate whether the analysis was helpful.
@@ -580,8 +582,8 @@ export default function CommunityPage() {
               <div className="flex items-center gap-3">
                 <Globe size={18} className={myPublicProfile ? 'text-brand' : 'text-text-ghost'} />
                 <div>
-                  <div className="text-sm font-bold text-text-dim">Your public profile</div>
-                  <div className="text-2xs text-text-ghost">{myPublicProfile ? 'Visible to other Optia Feed users' : 'Hidden — only you can see your profile'}</div>
+                  <div className="text-sm font-bold text-text-dim">{t('community.your_public_profile')}</div>
+                  <div className="text-2xs text-text-ghost">{myPublicProfile ? t('community.visible_to_users') : t('community.hidden_profile')}
                 </div>
               </div>
               <button onClick={togglePublicProfile} className={`relative w-12 h-6 rounded-full transition-colors ${myPublicProfile ? 'bg-brand' : 'bg-surface-deep border border-border'}`}>
@@ -605,14 +607,14 @@ export default function CommunityPage() {
                     <input value={mySpecialties.join(', ')} onChange={e => setMySpecialties(e.target.value.split(',').map(s => s.trim()).filter(Boolean))} className="input" placeholder="e.g. dairy, feedlot, TMR" />
                   </div>
                 </div>
-                <button onClick={saveProfileDetails} disabled={saving} className="btn btn-primary btn-sm w-fit">{saving ? 'Saving...' : 'Save Profile'}</button>
+                <button onClick={saveProfileDetails} disabled={saving} className="btn btn-primary btn-sm w-fit">{saving ? t('common.saving') : t('community.save_profile')}</button>
               </div>
             )}
           </div>
 
           {/* Directory list */}
           <div className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
-            {profiles.length} Professionals<span className="flex-1 h-px bg-border" />
+            {profiles.length} {t('community.professionals')}<span className="flex-1 h-px bg-border" />
           </div>
 
           {profiles.length > 0 ? (
@@ -641,8 +643,7 @@ export default function CommunityPage() {
           ) : (
             <div className="card p-8 text-center">
               <Users size={32} className="text-text-ghost mx-auto mb-3" />
-              <p className="text-sm text-text-ghost">No public profiles yet. Toggle yours on to be the first!</p>
-            </div>
+              <p className="text-sm text-text-ghost">{t('community.no_profiles')}</p> 
           )}
         </>
       )}
@@ -676,7 +677,7 @@ export default function CommunityPage() {
           ) : (
             <div className="card p-8 text-center">
               <Megaphone size={32} className="text-text-ghost mx-auto mb-3" />
-              <p className="text-sm text-text-ghost">No announcements yet. Stay tuned!</p>
+              <p className="text-sm text-text-ghost">{t('community.no_announcements')}</p>
             </div>
           )}
         </>
