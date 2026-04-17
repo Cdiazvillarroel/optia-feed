@@ -847,18 +847,20 @@ export default function FormulaBuilderPage() {
                   </div>
                   <input
                     type="number"
-                    value={c.min}
+                    value={c.min === 0 && c.source === 'profile' ? '' : c.min}
                     step="0.01"
-                    onChange={e => { const u = [...optConstraints]; u[i] = { ...u[i], min: parseFloat(e.target.value) || 0 }; setOptConstraints(u) }}
+                    placeholder="—"
+                    onChange={e => { const val = e.target.value; const u = [...optConstraints]; u[i] = { ...u[i], min: val === '' ? 0 : (parseFloat(val) || 0) }; setOptConstraints(u) }}
                     className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none"
                     disabled={!c.enabled}
                   />
                   <span className="text-2xs text-text-ghost">to</span>
                   <input
                     type="number"
-                    value={c.max}
+                    value={!isFinite(c.max) || c.max > 1e9 ? '' : c.max}
                     step="0.01"
-                    onChange={e => { const u = [...optConstraints]; u[i] = { ...u[i], max: parseFloat(e.target.value) || 0 }; setOptConstraints(u) }}
+                    placeholder="—"
+                    onChange={e => { const val = e.target.value; const u = [...optConstraints]; u[i] = { ...u[i], max: val === '' ? Infinity : (parseFloat(val) || 0) }; setOptConstraints(u) }}
                     className="w-16 px-1.5 py-1 rounded border border-border bg-surface-deep text-xs font-mono text-right outline-none"
                     disabled={!c.enabled}
                   />
