@@ -6,6 +6,17 @@ import type {
   OptNutrientConstraint,
 } from './types'
 
+// Sentinels — must match build-constraints.ts
+// Any min <= 0 is treated as "no lower bound"; any max >= this is "no upper bound"
+const NO_UPPER_THRESHOLD = 1e9
+
+function hasLowerBound(min: number): boolean {
+  return isFinite(min) && min > 0
+}
+function hasUpperBound(max: number): boolean {
+  return isFinite(max) && max < NO_UPPER_THRESHOLD
+}
+
 // ============================================================
 // PRIMARY ENTRY POINT
 // ============================================================
@@ -67,8 +78,15 @@ function tryLP(input: OptimizerInput): OptimizerResult {
     variables[`x_${i}`] = v
   }
 
+  // ── Build nutrient constraints, omitting unbounded sides ──
   for (const c of enabled) {
-    lpConstraints[c.key] = { min: c.min, max: c.max }
+    const cc: { min?: number; max?: number } = {}
+    if (hasLowerBound(c.min)) cc.min = c.min
+    if (hasUpperBound(c.max)) cc.max = c.max
+    // Only register if at least one side is bounded
+    if (cc.min !== undefined || cc.max !== undefined) {
+      lpConstraints[c.key] = cc
+    }
   }
 
   const model = {
@@ -140,7 +158,8 @@ function tryHeuristic(
     if (total < 99.5 || total > 100.5) return false
     for (const c of enabled) {
       const v = calcNut(sol, c.key)
-      if (v < c.min || v > c.max) return false
+      if (hasLowerBound(c.min) && v < c.min) return false
+      if (hasUpperBound(c.max) && v > c.max) return false
     }
     for (let i = 0; i < n; i++) {
       const ing = ingredients[i]
@@ -279,7 +298,12 @@ function findBinding(
       (s, pct, i) => s + (ingredients[i].nutrients[c.key] ?? 0) * pct / 100,
       0
     )
-    if (Math.abs(v - c.min) < eps || Math.abs(v - c.max) < eps) {
+    // Only mark as binding if the constraint side is actually bounded
+    if (hasLowerBound(c.min) && Math.abs(v - c.min) < eps) {
+      binding.push(c.key)
+      continue
+    }
+    if (hasUpperBound(c.max) && Math.abs(v - c.max) < eps) {
       binding.push(c.key)
     }
   }
@@ -327,12 +351,13 @@ function makeInfeasible(input: OptimizerInput): OptimizerResult {
     }
     const maxAch = Math.max(...values)
     const minAch = Math.min(...values)
-    if (c.min > maxAch) {
+    // Only flag when the bound is real
+    if (hasLowerBound(c.min) && c.min > maxAch) {
       reasons.push(
         `${c.key}: required min ${c.min} exceeds best ingredient (${maxAch.toFixed(2)})`
       )
     }
-    if (c.max < minAch) {
+    if (hasUpperBound(c.max) && c.max < minAch) {
       reasons.push(
         `${c.key}: required max ${c.max} below worst ingredient (${minAch.toFixed(2)})`
       )
