@@ -1546,6 +1546,6 @@ const TRANSLATIONS: Record<Language, any> = {
       duration_min: 'Duração (min)',
       travel_km: 'Viagem (km)',
       no_events: 'Sem eventos',
-    }
+    },
   },
 }
