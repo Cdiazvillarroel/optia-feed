@@ -583,7 +583,7 @@ export default function CommunityPage() {
                 <Globe size={18} className={myPublicProfile ? 'text-brand' : 'text-text-ghost'} />
                 <div>
                   <div className="text-sm font-bold text-text-dim">{t('community.your_public_profile')}</div>
-                  <div className="text-2xs text-text-ghost">{myPublicProfile ? t('community.visible_to_users') : t('community.hidden_profile')}
+                  <div className="text-2xs text-text-ghost">{myPublicProfile ? t('community.visible_to_users') : t('community.hidden_profile')}</div>
                 </div>
               </div>
               <button onClick={togglePublicProfile} className={`relative w-12 h-6 rounded-full transition-colors ${myPublicProfile ? 'bg-brand' : 'bg-surface-deep border border-border'}`}>
@@ -643,7 +643,8 @@ export default function CommunityPage() {
           ) : (
             <div className="card p-8 text-center">
               <Users size={32} className="text-text-ghost mx-auto mb-3" />
-              <p className="text-sm text-text-ghost">{t('community.no_profiles')}</p> 
+              <p className="text-sm text-text-ghost">{t('community.no_profiles')}</p>
+            </div>
           )}
         </>
       )}
