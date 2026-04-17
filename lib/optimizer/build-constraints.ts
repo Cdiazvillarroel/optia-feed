@@ -28,14 +28,36 @@ export interface OptConstraintForUI {
   profileNutrient?: string
 }
 
+// ── Units that the optimizer can handle (concentration-based) ──
+// Everything else (g/d, kg/d, Mcal/d, etc.) is absolute — can't constrain
+// a per-kg feed ration on a daily total.
+const VALID_UNITS = new Set([
+  '%', 'pct', 'percent',
+  'mj/kg', 'mj', 'mcal/kg', 'kcal/kg',
+  'g/kg', 'mg/kg', 'ppm',
+  '', // some profiles omit unit for % fields
+])
+
+function isConcentrationUnit(unit: string | undefined): boolean {
+  if (!unit) return true // empty unit — assume % (common in practice)
+  return VALID_UNITS.has(unit.toLowerCase().trim())
+}
+
+// ── Sentinel for "no upper/lower bound" ──────────────
+// We use Infinity in the internal representation and render it as an empty
+// input. The solver will skip the constraint on that side.
+const NO_UPPER = Infinity
+const NO_LOWER = 0
+
 /**
  * Builds optimizer constraints from a loaded profile.
  *
  * Strategy:
- * 1. For each requirement in the profile, map nutrient name → column key
- * 2. If mappable AND has min OR max → add as enabled constraint
- * 3. Skip if no column match (e.g. obscure nutrient not in our map)
- * 4. Skip if both min and max are null (informational only)
+ * 1. For each requirement: skip if unit is absolute (g/d, kg/d, etc.)
+ * 2. Map nutrient name → column key; skip if unmappable
+ * 3. Need at least one bound (min or max); skip if both null
+ * 4. Missing bounds map to "no bound" (NO_LOWER / NO_UPPER), not arbitrary numbers
+ * 5. Dedupe on column key (first wins)
  */
 export function buildConstraintsFromProfile(
   requirements: ProfileRequirement[],
@@ -47,21 +69,27 @@ export function buildConstraintsFromProfile(
   const seenKeys = new Set<string>()
 
   for (const req of requirements) {
+    // 1. Unit check — must be concentration-based
+    if (!isConcentrationUnit(req.unit)) continue
+
+    // 2. Map to column
     const columnKey = mapNutrientToColumn(req.nutrient, speciesMode)
     if (!columnKey) continue
-    if (seenKeys.has(columnKey)) continue // avoid duplicate columns
+    if (seenKeys.has(columnKey)) continue
 
+    // 3. Must have at least one bound
     const hasMin = req.min !== null && req.min !== undefined
     const hasMax = req.max !== null && req.max !== undefined
     if (!hasMin && !hasMax) continue
 
-    const min = hasMin ? Number(req.min) : 0
-    const max = hasMax ? Number(req.max) : 9999
+    // 4. Fill missing bounds with sentinels (not arbitrary numbers)
+    const min = hasMin ? Number(req.min) : NO_LOWER
+    const max = hasMax ? Number(req.max) : NO_UPPER
 
     constraints.push({
       key: columnKey,
       label: `${getConstraintLabel(req.nutrient)}${req.unit ? ` (${req.unit})` : ''}`,
-      enabled: true, // auto-enable everything from profile
+      enabled: true,
       min,
       max,
       source: 'profile',
@@ -76,9 +104,6 @@ export function buildConstraintsFromProfile(
 /**
  * Merges profile-derived constraints with system defaults.
  * Profile constraints take priority; defaults fill gaps.
- *
- * @param profileConstraints from buildConstraintsFromProfile
- * @param defaultConstraints from defaultOptConstraints (existing function)
  */
 export function mergeWithDefaults(
   profileConstraints: OptConstraintForUI[],
@@ -91,3 +116,6 @@ export function mergeWithDefaults(
 
   return [...profileConstraints, ...filteredDefaults]
 }
+
+// Export sentinels for UI rendering
+export { NO_UPPER, NO_LOWER }
