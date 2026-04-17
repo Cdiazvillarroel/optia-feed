@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { FileText, BarChart3, Users, FlaskConical, X, Download, Loader2 } from 'lucide-react'
+import { useTranslation } from '@/lib/i18n'
 
 export default function ReportsPage() {
+  const { t } = useTranslation()
   const [formulas, setFormulas] = useState<any[]>([])
   const [clients, setClients] = useState<any[]>([])
   const [formulaIngs, setFormulaIngs] = useState<Record<string,any[]>>({})
@@ -300,23 +302,23 @@ export default function ReportsPage() {
   }
 
   const reports = [
-    { key: 'formula', title: 'Formula Report', desc: 'Detailed formula breakdown with ingredient composition, full nutrient profile, cost analysis, and AI review notes.', icon: FlaskConical, color: '#BE5529', selector: 'formula' },
-    { key: 'client', title: 'Client Summary', desc: 'Comprehensive client overview with animal groups, assigned formulas, contact details, and production data.', icon: Users, color: '#1E4A5A', selector: 'client' },
-    { key: 'audit', title: 'Nutrition Audit', desc: 'Review all formulas for a client. Checks nutrient balance, flags issues, and compares across formulations.', icon: BarChart3, color: '#C9A043', selector: 'client' },
-    { key: 'cost', title: 'Cost Analysis', desc: 'Formula cost ranking and comparison. Identifies highest cost drivers and optimization opportunities.', icon: BarChart3, color: '#2E6B42', selector: 'client_optional' },
+    { key: 'formula', title: t('reports.formula_report'), desc: t('reports.formula_report_desc'), icon: FlaskConical, color: '#BE5529', selector: 'formula' },
+    { key: 'client', title: t('reports.client_summary'), desc: t('reports.client_summary_desc'), icon: Users, color: '#1E4A5A', selector: 'client' },
+    { key: 'audit', title: t('reports.nutrition_audit'), desc: t('reports.nutrition_audit_desc'), icon: BarChart3, color: '#C9A043', selector: 'client' },
+    { key: 'cost', title: t('reports.cost_analysis'), desc: t('reports.cost_analysis_desc'), icon: BarChart3, color: '#2E6B42', selector: 'client_optional' },
   ]
 
   return (
     <div className="p-7 max-w-[1000px]">
-      <h1 className="text-2xl font-bold text-text mb-1">Reports</h1>
-      <p className="text-base text-text-faint mb-5">Generate professional PDF reports for clients, formulas, and audits.</p>
+      <h1 className="text-2xl font-bold text-text mb-1">{t('reports.title')}</h1>
+      <p className="text-base text-text-faint mb-5">{t('reports.subtitle')}</p>
 
       {!disclaimerAccepted && (
         <div className="flex items-start gap-3 p-3.5 mb-5 rounded-lg bg-status-amber/5 border border-status-amber/25">
           <div className="text-status-amber text-lg leading-none">&#9888;</div>
           <div className="flex-1">
-            <div className="text-sm font-semibold text-status-amber mb-0.5">Disclaimer not accepted</div>
-            <div className="text-xs text-text-muted leading-relaxed">You haven&apos;t accepted the professional-use disclaimer. Exported reports will include a notice indicating this. You can accept the disclaimer at any time from the welcome wizard or Settings.</div>
+            <div className="text-sm font-semibold text-status-amber mb-0.5">{t('reports.disclaimer_not_accepted')}</div>
+            <div className="text-xs text-text-muted leading-relaxed">{t('reports.disclaimer_warning')}</div>
           </div>
         </div>
       )}
@@ -344,21 +346,21 @@ export default function ReportsPage() {
               <button onClick={() => setShowReport(null)} className="text-text-ghost bg-transparent border-none cursor-pointer"><X size={18} /></button>
             </div>
 
-            {(showReport === 'formula') && (
+            {showReport === 'formula' && (
               <div className="mb-4">
-                <label className="text-xs font-semibold text-text-muted block mb-1">Select Formula *</label>
+                <label className="text-xs font-semibold text-text-muted block mb-1">{t('reports.select_formula')} *</label>
                 <select value={selectedFormula} onChange={e => setSelectedFormula(e.target.value)} className="input">
-                  <option value="">Choose a formula...</option>
-                  {formulas.map(f => <option key={f.id} value={f.id}>{f.name} (v{f.version}) — {f.client?.name||'No client'}</option>)}
+                  <option value="">{t('reports.choose_formula')}</option>
+                  {formulas.map(f => <option key={f.id} value={f.id}>{f.name} (v{f.version}) — {f.client?.name||'—'}</option>)}
                 </select>
               </div>
             )}
 
             {(showReport === 'client' || showReport === 'audit') && (
               <div className="mb-4">
-                <label className="text-xs font-semibold text-text-muted block mb-1">Select Client *</label>
+                <label className="text-xs font-semibold text-text-muted block mb-1">{t('reports.select_client')} *</label>
                 <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} className="input">
-                  <option value="">Choose a client...</option>
+                  <option value="">{t('reports.choose_client')}</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name} — {c.location}</option>)}
                 </select>
               </div>
@@ -366,22 +368,22 @@ export default function ReportsPage() {
 
             {showReport === 'cost' && (
               <div className="mb-4">
-                <label className="text-xs font-semibold text-text-muted block mb-1">Client (optional — leave blank for all)</label>
+                <label className="text-xs font-semibold text-text-muted block mb-1">{t('reports.client_optional')}</label>
                 <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} className="input">
-                  <option value="">All formulas</option>
+                  <option value="">{t('reports.all_formulas')}</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
             )}
 
-            <p className="text-xs text-text-ghost mb-4">The report will open in a new window. Use <strong className="text-text-muted">Ctrl+P</strong> (or Cmd+P) to save as PDF. <strong>Every report includes the full professional-use disclaimer.</strong></p>
+            <p className="text-xs text-text-ghost mb-4">{t('reports.report_opens_new_window')} <strong className="text-text-muted">{t('reports.includes_disclaimer')}</strong></p>
 
             <div className="flex gap-2">
-              <button onClick={() => setShowReport(null)} className="btn btn-ghost flex-1 justify-center">Cancel</button>
+              <button onClick={() => setShowReport(null)} className="btn btn-ghost flex-1 justify-center">{t('common.cancel')}</button>
               <button onClick={handleGenerate}
                 disabled={generating || (showReport === 'formula' && !selectedFormula) || ((showReport === 'client' || showReport === 'audit') && !selectedClient)}
                 className="btn btn-primary flex-1 justify-center disabled:opacity-50">
-                {generating ? <><Loader2 size={14} className="animate-spin" /> Generating...</> : <><Download size={14} /> Generate Report</>}
+                {generating ? <><Loader2 size={14} className="animate-spin" /> {t('reports.generating')}</> : <><Download size={14} /> {t('reports.generate_report')}</>}
               </button>
             </div>
           </div>
@@ -389,4 +391,5 @@ export default function ReportsPage() {
       )}
     </div>
   )
+  
 }
